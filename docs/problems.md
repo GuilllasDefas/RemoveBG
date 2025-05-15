@@ -1,0 +1,1 @@
+- Processamento massivo não mostra o preview

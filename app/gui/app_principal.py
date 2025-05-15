@@ -23,7 +23,7 @@ class AplicativoRemoveFundo(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title(TITULO_APP)
-        self.geometry("1150x850")
+        self.geometry("1250x850")
         self.resizable(True, True)
 
         # Variáveis para guardar o modelo selecionado
@@ -654,11 +654,11 @@ class AplicativoRemoveFundo(ctk.CTk):
             messagebox.showerror("Erro", "A pasta de origem e destino não podem ser a mesma.")
             return
         
-        # Verificar se a pasta contém imagens válidas
-        processador_lote = ProcessadorLote(self.removedor, pasta_origem, pasta_destino, 
-                                         self.atualizar_progresso_lote)
-        
-        imagens = processador_lote.listar_imagens()
+        # Identificar as imagens na pasta
+        imagens = [f for f in os.listdir(pasta_origem) 
+                   if os.path.isfile(os.path.join(pasta_origem, f)) 
+                   and f.lower().endswith(EXTENSOES_SUPORTADAS)]
+                   
         if not imagens:
             messagebox.showinfo("Informação", "Nenhuma imagem compatível encontrada na pasta selecionada.")
             return
@@ -680,14 +680,50 @@ class AplicativoRemoveFundo(ctk.CTk):
             limiar_fundo = self.limiar_fundo_var.get()
             tamanho_erosao = self.erosao_tamanho_var.get()
             
-            # Executar processamento
-            arquivos_processados, total, erros = processador_lote.processar(
-                usar_alpha_matting, limiar_objeto, limiar_fundo, tamanho_erosao
-            )
+            processados = 0
+            erros = []
+            
+            for i, nome_arquivo in enumerate(imagens):
+                caminho_entrada = os.path.join(pasta_origem, nome_arquivo)
+                nome_saida = f"{os.path.splitext(nome_arquivo)[0]}_{nome_modelo}_sem_fundo.png"
+                caminho_saida = os.path.join(pasta_destino, nome_saida)
+                
+                # Atualizar progresso
+                progresso = (i + 1) / total_arquivos
+                status_texto = f"Lote ({nome_modelo}) {i+1}/{total_arquivos}: {nome_arquivo}"
+                self.after(0, self.atualizar_progresso_lote, progresso, status_texto)
+                
+                try:
+                    # Carregar a imagem original e mostrar preview
+                    imagem = carregar_imagem(caminho_entrada)
+                    
+                    # Exibir preview da imagem original
+                    self.after(0, lambda img=imagem: self.exibir_imagem_no_canvas(
+                        self.canvas_imagem_original, img, 'entrada'))
+                    self.after(0, self.update)  # Forçar atualização da interface
+                    
+                    # Processar a imagem e mostrar resultado
+                    imagem_resultado = self.removedor.processar_imagem(
+                        imagem, usar_alpha_matting, limiar_objeto, limiar_fundo, tamanho_erosao
+                    )
+                    
+                    # Exibir preview do resultado
+                    self.after(0, lambda img=imagem_resultado: self.exibir_imagem_no_canvas(
+                        self.canvas_imagem_resultado, img, 'resultado'))
+                    self.after(0, self.update)  # Forçar atualização da interface
+                    
+                    # Salvar o resultado
+                    imagem_resultado.save(caminho_saida)
+                    processados += 1
+                    
+                except Exception as e:
+                    erro_msg = f"'{nome_arquivo}': {e}"
+                    erros.append(erro_msg)
+                    print(f"Erro ao processar {nome_arquivo}: {e}")
             
             # Atualizar interface após conclusão
             self.after(0, self.finalizar_processamento_lote, 
-                    arquivos_processados, total, erros, nome_modelo)
+                    processados, total_arquivos, erros, nome_modelo)
         
         self.processamento_ativo = True
         threading.Thread(target=processar_lote, daemon=True).start()

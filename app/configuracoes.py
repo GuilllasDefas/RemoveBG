@@ -1,7 +1,7 @@
 # Arquivo de configurações globais
 
 # Versão do aplicativo
-VERSAO = "0.8.0"
+VERSAO = "0.8.1"
 TITULO_APP = f"Remover Fundo v{VERSAO} - Beta"
 
 # Modelos disponíveis no rembg
