@@ -1,9 +1,13 @@
-import customtkinter as ctk
-from tkinter import filedialog, messagebox, StringVar, Menu, Canvas, Scrollbar
-from PIL import Image, ImageTk
+from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QGridLayout, 
+                           QPushButton, QLabel, QWidget, QFileDialog, QMessageBox,
+                           QComboBox, QCheckBox, QSlider, QProgressBar, QScrollArea,
+                           QFrame, QSplitter, QMenu, QStatusBar)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer
+from PyQt6.QtGui import QAction, QPixmap, QImage, QFont
 import os
 import threading
 import io
+from PIL import Image, ImageQt
 
 from app.configuracoes import (
     VERSAO, TITULO_APP, MODELOS_DISPONIVEIS, MODELO_PADRAO,
@@ -19,174 +23,233 @@ from app.processadores.processador_lote import ProcessadorLote
 from app.processadores.editor_imagem import EditorImagem
 from app.utils.imagem_utils import criar_preview, carregar_imagem
 
-class AplicativoRemoveFundo(ctk.CTk):
+class ProcessadorThread(QThread):
+    """Thread para processar imagens em segundo plano"""
+    concluido = pyqtSignal(object)
+    progresso = pyqtSignal(float, str)
+    erro = pyqtSignal(str)
+    
+    def __init__(self, funcao, *args, **kwargs):
+        super().__init__()
+        self.funcao = funcao
+        self.args = args
+        self.kwargs = kwargs
+        
+    def run(self):
+        try:
+            resultado = self.funcao(*self.args, **self.kwargs)
+            self.concluido.emit(resultado)
+        except Exception as e:
+            self.erro.emit(str(e))
+
+class AplicativoRemoveFundo(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.title(TITULO_APP)
-        self.geometry("1250x850")
-        self.resizable(True, True)
-
+        self.setWindowTitle(TITULO_APP)
+        self.resize(1250, 850)
+        
         # Variáveis para guardar o modelo selecionado
-        self.modelo_selecionado_var = StringVar(value=MODELO_PADRAO)
+        self.modelo_selecionado = MODELO_PADRAO
 
         # Objeto removedor de fundo
-        self.removedor = RemoveFundo(self.modelo_selecionado_var.get())
+        self.removedor = RemoveFundo(self.modelo_selecionado)
 
-        # Configuração do layout principal
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
-
-        # --- Cabeçalho ---
-        self.criar_cabecalho()
+        # Widget central
+        self.widget_central = QWidget()
+        self.setCentralWidget(self.widget_central)
         
-        # --- Menu Superior ---
+        # Layout principal
+        self.layout_principal = QVBoxLayout(self.widget_central)
+        
+        # --- Criação da GUI ---
+        self.criar_cabecalho()
         self.criar_menu()
-
-        # --- Frame Principal ---
         self.criar_frame_principal()
-
-        # --- Barra de Status e Progresso ---
         self.criar_barra_status()
-
+        
         # --- Variáveis de Estado ---
         self.imagem_entrada_completa = None
         self.imagem_resultado_completa = None
-        self.tk_preview_entrada = None
-        self.tk_preview_resultado = None
+        self.pixmap_entrada = None
+        self.pixmap_resultado = None
         self.caminho_arquivo_atual = None
         self.processamento_ativo = False
-        self.id_imagem_canvas_original = None
-        self.id_imagem_canvas_resultado = None
-
-        # Vincular eventos de redimensionamento
-        self.canvas_imagem_original.bind("<Configure>", self.redimensionar_previews)
-        self.canvas_imagem_resultado.bind("<Configure>", self.redimensionar_previews)
-
+        
         # Inicializar as configurações padrão
         self.restaurar_padroes()
-
+        
         # Atualizar estados dos menus
         self.atualizar_estados_menu()
         
     def criar_cabecalho(self):
         """Cria o cabeçalho da aplicação"""
-        self.frame_cabecalho = ctk.CTkFrame(self)
-        self.frame_cabecalho.grid(row=0, column=0, padx=20, pady=(10, 5), sticky="ew")
-        self.frame_cabecalho.grid_columnconfigure(1, weight=1)
+        self.frame_cabecalho = QWidget()
+        self.layout_cabecalho = QHBoxLayout(self.frame_cabecalho)
+        self.layout_cabecalho.setContentsMargins(10, 10, 10, 5)
         
-        self.botao_sobre = ctk.CTkButton(self.frame_cabecalho, text="Sobre", command=self.mostrar_sobre, width=80)
-        self.botao_sobre.grid(row=0, column=0, padx=(0, 10), sticky="w")
+        self.botao_sobre = QPushButton("Sobre")
+        self.botao_sobre.clicked.connect(self.mostrar_sobre)
+        self.botao_sobre.setFixedWidth(80)
+        self.layout_cabecalho.addWidget(self.botao_sobre)
         
-        self.rotulo_cabecalho = ctk.CTkLabel(self.frame_cabecalho, 
-                                           text=f"Removedor de Fundos v{VERSAO} - Beta",
-                                           font=ctk.CTkFont(size=36, weight="bold"))
-        self.rotulo_cabecalho.grid(row=0, column=1, padx=10, sticky="ew")
+        titulo_fonte = QFont()
+        titulo_fonte.setPointSize(18)
+        titulo_fonte.setBold(True)
+        
+        self.rotulo_cabecalho = QLabel(f"Removedor de Fundos v{VERSAO} - Beta")
+        self.rotulo_cabecalho.setFont(titulo_fonte)
+        self.rotulo_cabecalho.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layout_cabecalho.addWidget(self.rotulo_cabecalho, 1)
+        
+        self.layout_principal.addWidget(self.frame_cabecalho)
         
     def criar_menu(self):
         """Cria o menu principal da aplicação"""
-        self.barra_menu = Menu(self)
-        self.config(menu=self.barra_menu)
+        self.menu_principal = self.menuBar()
         
         # Menu Arquivo
-        self.menu_arquivo = Menu(self.barra_menu, tearoff=0)
-        self.menu_arquivo.add_command(label="Selecionar Imagem", command=self.selecionar_imagem)
-        self.menu_arquivo.add_command(label="Salvar Resultado", command=lambda: self.salvar_imagem())
-        self.menu_arquivo.add_separator()
-        self.menu_arquivo.add_command(label="Sair", command=self.quit)
-        self.barra_menu.add_cascade(label="Arquivo", menu=self.menu_arquivo)
+        self.menu_arquivo = self.menu_principal.addMenu("Arquivo")
+        
+        self.acao_selecionar = QAction("Selecionar Imagem", self)
+        self.acao_selecionar.triggered.connect(self.selecionar_imagem)
+        self.menu_arquivo.addAction(self.acao_selecionar)
+        
+        self.acao_salvar = QAction("Salvar Resultado", self)
+        self.acao_salvar.triggered.connect(lambda: self.salvar_imagem())
+        self.acao_salvar.setEnabled(False)
+        self.menu_arquivo.addAction(self.acao_salvar)
+        
+        self.menu_arquivo.addSeparator()
+        
+        self.acao_sair = QAction("Sair", self)
+        self.acao_sair.triggered.connect(self.close)
+        self.menu_arquivo.addAction(self.acao_sair)
         
         # Menu Ferramentas
-        self.menu_ferramentas = Menu(self.barra_menu, tearoff=0)
-        self.menu_ferramentas.add_command(label="Processar Pasta", 
-                                         command=lambda: self.processar_pasta())
-        self.menu_ferramentas.add_command(label="Aplicar Ajustes", 
-                                         command=lambda: self.processar_imagem())
-        self.menu_ferramentas.add_command(label="Cortar Imagem", 
-                                         command=lambda: self.abrir_ferramenta_recorte())
-        self.menu_ferramentas.add_command(label="Borracha", 
-                                         command=lambda: self.abrir_ferramenta_borracha())
-        self.menu_ferramentas.add_command(label="Recorte em Massa", 
-                                         command=lambda: self.recortar_imagens_em_massa())
-        self.barra_menu.add_cascade(label="Ferramentas", menu=self.menu_ferramentas)
+        self.menu_ferramentas = self.menu_principal.addMenu("Ferramentas")
+        
+        self.acao_pasta = QAction("Processar Pasta", self)
+        self.acao_pasta.triggered.connect(lambda: self.processar_pasta())
+        self.menu_ferramentas.addAction(self.acao_pasta)
+        
+        self.acao_processar = QAction("Aplicar Ajustes", self)
+        self.acao_processar.triggered.connect(lambda: self.processar_imagem())
+        self.acao_processar.setEnabled(False)
+        self.menu_ferramentas.addAction(self.acao_processar)
+        
+        self.acao_recorte = QAction("Cortar Imagem", self)
+        self.acao_recorte.triggered.connect(lambda: self.abrir_ferramenta_recorte())
+        self.acao_recorte.setEnabled(False)
+        self.menu_ferramentas.addAction(self.acao_recorte)
+        
+        self.acao_borracha = QAction("Borracha", self)
+        self.acao_borracha.triggered.connect(lambda: self.abrir_ferramenta_borracha())
+        self.acao_borracha.setEnabled(False)
+        self.menu_ferramentas.addAction(self.acao_borracha)
+        
+        self.acao_recorte_massa = QAction("Recorte em Massa", self)
+        self.acao_recorte_massa.triggered.connect(lambda: self.recortar_imagens_em_massa())
+        self.menu_ferramentas.addAction(self.acao_recorte_massa)
         
         # Menu Ajuda
-        self.menu_ajuda = Menu(self.barra_menu, tearoff=0)
-        self.menu_ajuda.add_command(label="Sobre", command=lambda: self.mostrar_sobre())
-        self.barra_menu.add_cascade(label="Ajuda", menu=self.menu_ajuda)
+        self.menu_ajuda = self.menu_principal.addMenu("Ajuda")
+        
+        self.acao_sobre = QAction("Sobre", self)
+        self.acao_sobre.triggered.connect(lambda: self.mostrar_sobre())
+        self.menu_ajuda.addAction(self.acao_sobre)
         
     def criar_frame_principal(self):
         """Cria o frame principal da aplicação"""
-        self.frame_principal = ctk.CTkFrame(self)
-        self.frame_principal.grid(row=1, column=0, padx=20, pady=5, sticky="nsew")
-        self.frame_principal.grid_columnconfigure((0, 1), weight=1)
-        self.frame_principal.grid_columnconfigure(2, weight=0, minsize=220)
-        self.frame_principal.grid_rowconfigure(1, weight=1)
+        self.frame_principal = QWidget()
+        self.layout_frame_principal = QHBoxLayout(self.frame_principal)
         
         self.criar_painel_original()
         self.criar_painel_resultado()
         self.criar_painel_ajustes()
         
+        self.layout_principal.addWidget(self.frame_principal, 1)
+        
     def criar_painel_original(self):
         """Cria o painel da imagem original"""
-        self.frame_original = ctk.CTkFrame(self.frame_principal)
-        self.frame_original.grid(row=0, column=0, rowspan=2, padx=10, pady=10, sticky="nsew")
-        self.frame_original.grid_rowconfigure(1, weight=1)
-        self.frame_original.grid_columnconfigure(0, weight=1)
+        self.frame_original = QWidget()
+        self.layout_original = QVBoxLayout(self.frame_original)
         
-        self.rotulo_original = ctk.CTkLabel(self.frame_original, text="Imagem Original (Preview)")
-        self.rotulo_original.grid(row=0, column=0, padx=10, pady=5, sticky="n")
+        self.rotulo_original = QLabel("Imagem Original (Preview)")
+        self.rotulo_original.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layout_original.addWidget(self.rotulo_original)
         
-        self.canvas_imagem_original = ctk.CTkCanvas(self.frame_original, 
-                                                  bg=self.cget('bg'), 
-                                                  highlightthickness=0)
-        self.canvas_imagem_original.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+        # Área de rolagem para a imagem original
+        self.scroll_area_original = QScrollArea()
+        self.scroll_area_original.setWidgetResizable(True)
+        self.scroll_area_original.setFrameShape(QFrame.Shape.NoFrame)
         
-        self.botao_ver_original = ctk.CTkButton(self.frame_original, 
-                                              text="Ver Original", 
-                                              command=lambda: self.mostrar_imagem_completa('original'), 
-                                              state="disabled")
-        self.botao_ver_original.grid(row=2, column=0, padx=10, pady=5, sticky="s")
+        # Label para a imagem
+        self.label_imagem_original = QLabel()
+        self.label_imagem_original.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_imagem_original.setMinimumSize(400, 300)
+        self.scroll_area_original.setWidget(self.label_imagem_original)
+        
+        self.layout_original.addWidget(self.scroll_area_original, 1)
+        
+        self.botao_ver_original = QPushButton("Ver Original")
+        self.botao_ver_original.clicked.connect(lambda: self.mostrar_imagem_completa('original'))
+        self.botao_ver_original.setEnabled(False)
+        self.layout_original.addWidget(self.botao_ver_original)
+        
+        self.layout_frame_principal.addWidget(self.frame_original, 1)
         
     def criar_painel_resultado(self):
         """Cria o painel da imagem resultado"""
-        self.frame_resultado = ctk.CTkFrame(self.frame_principal)
-        self.frame_resultado.grid(row=0, column=1, rowspan=2, padx=10, pady=10, sticky="nsew")
-        self.frame_resultado.grid_rowconfigure(1, weight=1)
-        self.frame_resultado.grid_columnconfigure(0, weight=1)
+        self.frame_resultado = QWidget()
+        self.layout_resultado = QVBoxLayout(self.frame_resultado)
         
-        self.rotulo_resultado = ctk.CTkLabel(self.frame_resultado, text="Resultado (Preview)")
-        self.rotulo_resultado.grid(row=0, column=0, padx=10, pady=5, sticky="n")
+        self.rotulo_resultado = QLabel("Resultado (Preview)")
+        self.rotulo_resultado.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layout_resultado.addWidget(self.rotulo_resultado)
         
-        self.canvas_imagem_resultado = ctk.CTkCanvas(self.frame_resultado, 
-                                                   bg=self.cget('bg'), 
-                                                   highlightthickness=0)
-        self.canvas_imagem_resultado.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
+        # Área de rolagem para a imagem resultado
+        self.scroll_area_resultado = QScrollArea()
+        self.scroll_area_resultado.setWidgetResizable(True)
+        self.scroll_area_resultado.setFrameShape(QFrame.Shape.NoFrame)
         
-        self.botao_ver_resultado = ctk.CTkButton(self.frame_resultado, 
-                                              text="Ver Resultado", 
-                                              command=lambda: self.mostrar_imagem_completa('resultado'), 
-                                              state="disabled")
-        self.botao_ver_resultado.grid(row=2, column=0, padx=10, pady=5, sticky="s")
+        # Label para a imagem
+        self.label_imagem_resultado = QLabel()
+        self.label_imagem_resultado.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label_imagem_resultado.setMinimumSize(400, 300)
+        self.scroll_area_resultado.setWidget(self.label_imagem_resultado)
+        
+        self.layout_resultado.addWidget(self.scroll_area_resultado, 1)
+        
+        self.botao_ver_resultado = QPushButton("Ver Resultado")
+        self.botao_ver_resultado.clicked.connect(lambda: self.mostrar_imagem_completa('resultado'))
+        self.botao_ver_resultado.setEnabled(False)
+        self.layout_resultado.addWidget(self.botao_ver_resultado)
+        
+        self.layout_frame_principal.addWidget(self.frame_resultado, 1)
         
     def criar_painel_ajustes(self):
         """Cria o painel de ajustes e controles"""
-        self.frame_ajustes = ctk.CTkFrame(self.frame_principal)
-        self.frame_ajustes.grid(row=0, column=2, rowspan=2, padx=(5, 10), pady=10, sticky="ns")
+        self.frame_ajustes = QWidget()
+        self.frame_ajustes.setFixedWidth(220)
+        self.layout_ajustes = QVBoxLayout(self.frame_ajustes)
         
-        rotulo_ajustes = ctk.CTkLabel(self.frame_ajustes, 
-                                    text="Ajustes e Modelo", 
-                                    font=ctk.CTkFont(weight="bold"))
-        rotulo_ajustes.pack(pady=(10, 15), padx=10)
+        # Título do painel
+        rotulo_ajustes = QLabel("Ajustes e Modelo")
+        fonte_titulo = QFont()
+        fonte_titulo.setBold(True)
+        rotulo_ajustes.setFont(fonte_titulo)
+        rotulo_ajustes.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layout_ajustes.addWidget(rotulo_ajustes)
         
         # Seleção de Modelo
-        rotulo_modelo = ctk.CTkLabel(self.frame_ajustes, text="Modelo de IA:")
-        rotulo_modelo.pack(pady=(5, 0), padx=10, anchor="w")
+        rotulo_modelo = QLabel("Modelo de IA:")
+        self.layout_ajustes.addWidget(rotulo_modelo)
         
-        self.menu_modelo = ctk.CTkOptionMenu(self.frame_ajustes,
-                                           variable=self.modelo_selecionado_var,
-                                           values=MODELOS_DISPONIVEIS,
-                                           command=self.ao_mudar_modelo)
-        self.menu_modelo.pack(pady=(0, 10), padx=10, fill="x")
+        self.combo_modelo = QComboBox()
+        self.combo_modelo.addItems(MODELOS_DISPONIVEIS)
+        self.combo_modelo.setCurrentText(MODELO_PADRAO)
+        self.combo_modelo.currentTextChanged.connect(self.ao_mudar_modelo)
+        self.layout_ajustes.addWidget(self.combo_modelo)
         
         DicaFlutuante(rotulo_modelo, 
                     "Escolha o modelo de Inteligência Artificial para remover o fundo.\n"
@@ -197,15 +260,10 @@ class AplicativoRemoveFundo(ctk.CTk):
                     "- isnet-*: Modelos mais recentes, boa qualidade (podem ser mais lentos).\n"
                     "Experimente modelos diferentes para melhores resultados!")
         
-        DicaFlutuante(self.menu_modelo, "Escolha o modelo de IA (veja dica acima).")
-        
         # Controles Alpha Matting
-        self.alpha_matting_var = ctk.BooleanVar(value=ALPHA_MATTING_PADRAO)
-        self.check_alpha_matting = ctk.CTkCheckBox(self.frame_ajustes, 
-                                                 text="Alpha Matting", 
-                                                 variable=self.alpha_matting_var, 
-                                                 command=self.ao_mudar_configuracoes)
-        self.check_alpha_matting.pack(pady=5, padx=10, anchor="w")
+        self.check_alpha_matting = QCheckBox("Alpha Matting")
+        self.check_alpha_matting.stateChanged.connect(self.ao_mudar_configuracoes)
+        self.layout_ajustes.addWidget(self.check_alpha_matting)
         
         DicaFlutuante(self.check_alpha_matting, 
                     "Técnica adicional para refinar bordas suaves (como cabelo ou pelos).\n"
@@ -213,23 +271,18 @@ class AplicativoRemoveFundo(ctk.CTk):
                     "Desative se o resultado parecer estranho ou muito lento.")
         
         # Limiar Objeto
-        rotulo_limiar_objeto = ctk.CTkLabel(self.frame_ajustes, text="Limiar Objeto (0-255)")
-        rotulo_limiar_objeto.pack(pady=(10, 0), padx=10, anchor="w")
+        rotulo_limiar_objeto = QLabel("Limiar Objeto (0-255)")
+        self.layout_ajustes.addWidget(rotulo_limiar_objeto)
         
-        self.limiar_objeto_var = ctk.IntVar(value=LIMIAR_OBJETO_PADRAO)
-        self.slider_limiar_objeto = ctk.CTkSlider(self.frame_ajustes, 
-                                                from_=0, 
-                                                to=255, 
-                                                number_of_steps=255, 
-                                                variable=self.limiar_objeto_var, 
-                                                command=lambda v: self.atualizar_rotulo_slider(v, 
-                                                                                            self.rotulo_limiar_objeto, 
-                                                                                            "Limiar Objeto"))
-        self.slider_limiar_objeto.pack(pady=5, padx=10, fill="x")
+        self.slider_limiar_objeto = QSlider(Qt.Orientation.Horizontal)
+        self.slider_limiar_objeto.setRange(0, 255)
+        self.slider_limiar_objeto.setValue(LIMIAR_OBJETO_PADRAO)
+        self.slider_limiar_objeto.valueChanged.connect(
+            lambda v: self.atualizar_rotulo_slider(v, self.rotulo_limiar_objeto, "Limiar Objeto"))
+        self.layout_ajustes.addWidget(self.slider_limiar_objeto)
         
-        self.rotulo_limiar_objeto = ctk.CTkLabel(self.frame_ajustes, 
-                                               text=f"Limiar Objeto: {self.limiar_objeto_var.get()}")
-        self.rotulo_limiar_objeto.pack(pady=(0,10), padx=10, anchor="w")
+        self.rotulo_limiar_objeto = QLabel(f"Limiar Objeto: {LIMIAR_OBJETO_PADRAO}")
+        self.layout_ajustes.addWidget(self.rotulo_limiar_objeto)
         
         DicaFlutuante(rotulo_limiar_objeto, 
                     "Define o quão 'opaco' um pixel precisa ser para ser considerado parte do objeto principal.\n"
@@ -238,23 +291,18 @@ class AplicativoRemoveFundo(ctk.CTk):
                     "(Funciona melhor com Alpha Matting ativado)")
         
         # Limiar Fundo
-        rotulo_limiar_fundo = ctk.CTkLabel(self.frame_ajustes, text="Limiar Fundo (0-255)")
-        rotulo_limiar_fundo.pack(pady=(10, 0), padx=10, anchor="w")
+        rotulo_limiar_fundo = QLabel("Limiar Fundo (0-255)")
+        self.layout_ajustes.addWidget(rotulo_limiar_fundo)
         
-        self.limiar_fundo_var = ctk.IntVar(value=LIMIAR_FUNDO_PADRAO)
-        self.slider_limiar_fundo = ctk.CTkSlider(self.frame_ajustes, 
-                                               from_=0, 
-                                               to=255, 
-                                               number_of_steps=255, 
-                                               variable=self.limiar_fundo_var, 
-                                               command=lambda v: self.atualizar_rotulo_slider(v, 
-                                                                                           self.rotulo_limiar_fundo, 
-                                                                                           "Limiar Fundo"))
-        self.slider_limiar_fundo.pack(pady=5, padx=10, fill="x")
+        self.slider_limiar_fundo = QSlider(Qt.Orientation.Horizontal)
+        self.slider_limiar_fundo.setRange(0, 255)
+        self.slider_limiar_fundo.setValue(LIMIAR_FUNDO_PADRAO)
+        self.slider_limiar_fundo.valueChanged.connect(
+            lambda v: self.atualizar_rotulo_slider(v, self.rotulo_limiar_fundo, "Limiar Fundo"))
+        self.layout_ajustes.addWidget(self.slider_limiar_fundo)
         
-        self.rotulo_limiar_fundo = ctk.CTkLabel(self.frame_ajustes, 
-                                              text=f"Limiar Fundo: {self.limiar_fundo_var.get()}")
-        self.rotulo_limiar_fundo.pack(pady=(0,10), padx=10, anchor="w")
+        self.rotulo_limiar_fundo = QLabel(f"Limiar Fundo: {LIMIAR_FUNDO_PADRAO}")
+        self.layout_ajustes.addWidget(self.rotulo_limiar_fundo)
         
         DicaFlutuante(rotulo_limiar_fundo, 
                     "Define o quão 'transparente' um pixel precisa ser para ser considerado parte do fundo.\n"
@@ -263,23 +311,18 @@ class AplicativoRemoveFundo(ctk.CTk):
                     "(Funciona melhor com Alpha Matting ativado)")
         
         # Erosão Máscara
-        rotulo_erosao = ctk.CTkLabel(self.frame_ajustes, text="Erosão Máscara (0-50)")
-        rotulo_erosao.pack(pady=(10, 0), padx=10, anchor="w")
+        rotulo_erosao = QLabel("Erosão Máscara (0-50)")
+        self.layout_ajustes.addWidget(rotulo_erosao)
         
-        self.erosao_tamanho_var = ctk.IntVar(value=EROSAO_MASCARA_PADRAO)
-        self.slider_erosao = ctk.CTkSlider(self.frame_ajustes, 
-                                         from_=0, 
-                                         to=50, 
-                                         number_of_steps=50, 
-                                         variable=self.erosao_tamanho_var, 
-                                         command=lambda v: self.atualizar_rotulo_slider(v, 
-                                                                                      self.rotulo_erosao, 
-                                                                                      "Erosão Máscara"))
-        self.slider_erosao.pack(pady=5, padx=10, fill="x")
+        self.slider_erosao = QSlider(Qt.Orientation.Horizontal)
+        self.slider_erosao.setRange(0, 50)
+        self.slider_erosao.setValue(EROSAO_MASCARA_PADRAO)
+        self.slider_erosao.valueChanged.connect(
+            lambda v: self.atualizar_rotulo_slider(v, self.rotulo_erosao, "Erosão Máscara"))
+        self.layout_ajustes.addWidget(self.slider_erosao)
         
-        self.rotulo_erosao = ctk.CTkLabel(self.frame_ajustes, 
-                                        text=f"Erosão Máscara: {self.erosao_tamanho_var.get()}")
-        self.rotulo_erosao.pack(pady=(0,10), padx=10, anchor="w")
+        self.rotulo_erosao = QLabel(f"Erosão Máscara: {EROSAO_MASCARA_PADRAO}")
+        self.layout_ajustes.addWidget(self.rotulo_erosao)
         
         DicaFlutuante(rotulo_erosao, 
                     "Reduz o tamanho da máscara final (recorte) em alguns pixels.\n"
@@ -288,36 +331,40 @@ class AplicativoRemoveFundo(ctk.CTk):
                     "(Funciona melhor com Alpha Matting ativado)")
         
         # Botão Restaurar Padrões
-        self.botao_restaurar_padroes = ctk.CTkButton(self.frame_ajustes, 
-                                                   text="Restaurar Padrões", 
-                                                   command=self.restaurar_padroes)
-        self.botao_restaurar_padroes.pack(pady=5, padx=10, fill="x")
+        self.botao_restaurar_padroes = QPushButton("Restaurar Padrões")
+        self.botao_restaurar_padroes.clicked.connect(self.restaurar_padroes)
+        self.layout_ajustes.addWidget(self.botao_restaurar_padroes)
         
         DicaFlutuante(self.botao_restaurar_padroes, 
                     "Restaura os valores para configurações recomendadas.")
         
+        # Adicionar espaçador para empurrar widgets para cima
+        self.layout_ajustes.addStretch(1)
+        
+        self.layout_frame_principal.addWidget(self.frame_ajustes)
+        
     def criar_barra_status(self):
         """Cria a barra de status e progresso"""
-        self.frame_status = ctk.CTkFrame(self)
-        self.frame_status.grid(row=2, column=0, padx=20, pady=(0, 5), sticky="ew")
-        self.frame_status.grid_columnconfigure(0, weight=1)
+        self.barra_status = QStatusBar()
+        self.setStatusBar(self.barra_status)
         
-        self.rotulo_status = ctk.CTkLabel(self.frame_status, text="Pronto", anchor="w")
-        self.rotulo_status.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
+        self.rotulo_status = QLabel("Pronto")
+        self.barra_status.addWidget(self.rotulo_status, 1)
         
-        self.barra_progresso = ctk.CTkProgressBar(self.frame_status, orientation="horizontal", mode="determinate")
-        self.barra_progresso.set(0)
-        # A barra de progresso só será exibida quando necessário
-    
+        self.barra_progresso = QProgressBar()
+        self.barra_progresso.setFixedWidth(200)
+        self.barra_progresso.setVisible(False)
+        self.barra_status.addPermanentWidget(self.barra_progresso)
+        
     def atualizar_estados_menu(self):
         """Atualiza os estados dos itens do menu com base no estado atual da aplicação"""
         tem_resultado = self.imagem_resultado_completa is not None
         tem_imagem = self.imagem_entrada_completa is not None
         
-        self.menu_arquivo.entryconfig(1, state="normal" if tem_resultado else "disabled")  # "Salvar Resultado"
-        self.menu_ferramentas.entryconfig(1, state="normal" if tem_imagem else "disabled")  # "Aplicar Ajustes"
-        self.menu_ferramentas.entryconfig(2, state="normal" if tem_imagem else "disabled")  # "Cortar Imagem"
-        self.menu_ferramentas.entryconfig(3, state="normal" if tem_imagem else "disabled")  # "Borracha"
+        self.acao_salvar.setEnabled(tem_resultado)
+        self.acao_processar.setEnabled(tem_imagem)
+        self.acao_recorte.setEnabled(tem_imagem)
+        self.acao_borracha.setEnabled(tem_imagem)
     
     def mostrar_sobre(self):
         """Exibe informações sobre o aplicativo"""
@@ -334,31 +381,32 @@ class AplicativoRemoveFundo(ctk.CTk):
                     "Dica: Passe o mouse sobre os controles de ajuste para ver o que eles fazem! "
                     "Experimente diferentes modelos e ajustes para obter o melhor resultado."
                    )
-        messagebox.showinfo("Sobre", texto_info)
+        QMessageBox.information(self, "Sobre", texto_info)
     
     def ao_mudar_modelo(self, modelo_selecionado):
         """Chamado quando o usuário seleciona um novo modelo"""
         print(f"Modelo selecionado: {modelo_selecionado}")
         try:
             # Atualiza o modelo no removedor
+            self.modelo_selecionado = modelo_selecionado
             self.removedor.mudar_modelo(modelo_selecionado)
             print("Sessão rembg atualizada.")
             # Habilita o botão de reprocessar se uma imagem estiver carregada
             self.ao_mudar_configuracoes()
         except Exception as e:
-            messagebox.showerror("Erro de Modelo", 
+            QMessageBox.critical(self, "Erro de Modelo", 
                                f"Não foi possível carregar o modelo '{modelo_selecionado}':\n{e}\n\n"
                                "Verifique se o rembg e suas dependências estão instalados corretamente "
                                "ou se o modelo é válido.")
-            self.modelo_selecionado_var.set(MODELO_PADRAO)
+            self.combo_modelo.setCurrentText(MODELO_PADRAO)
             self.removedor.mudar_modelo(MODELO_PADRAO)
     
-    def atualizar_rotulo_slider(self, valor, widget_rotulo, prefixo):
+    def atualizar_rotulo_slider(self, valor, rotulo, prefixo):
         """Atualiza o texto do rótulo de um slider e habilita reprocessamento"""
-        widget_rotulo.configure(text=f"{prefixo}: {int(valor)}")
+        rotulo.setText(f"{prefixo}: {valor}")
         self.ao_mudar_configuracoes()
     
-    def ao_mudar_configuracoes(self, *args):
+    def ao_mudar_configuracoes(self):
         """Chamado quando qualquer controle de ajuste (slider, checkbox, modelo) muda"""
         if self.imagem_entrada_completa and not self.processamento_ativo:
             self.atualizar_estados_menu()
@@ -366,189 +414,171 @@ class AplicativoRemoveFundo(ctk.CTk):
     def selecionar_imagem(self):
         """Abre o diálogo para selecionar uma imagem"""
         if self.processamento_ativo:
-            messagebox.showwarning("Atenção", "Aguarde o processamento atual terminar.")
+            QMessageBox.warning(self, "Atenção", "Aguarde o processamento atual terminar.")
             return
             
-        caminho_arquivo = filedialog.askopenfilename(
-            title="Selecione a Imagem",
-            filetypes=[("Arquivos de Imagem", " ".join(f"*{ext}" for ext in EXTENSOES_SUPORTADAS))]
+        tipos_arquivo = f"Arquivos de Imagem ({' '.join(['*' + ext for ext in EXTENSOES_SUPORTADAS])})"
+        caminho_arquivo, _ = QFileDialog.getOpenFileName(
+            self, "Selecione a Imagem", "", tipos_arquivo
         )
         
         if caminho_arquivo:
             try:
-                self.rotulo_status.configure(text="Carregando imagem...")
-                self.update()
+                self.rotulo_status.setText("Carregando imagem...")
                 
                 imagem = carregar_imagem(caminho_arquivo)
                 self.imagem_entrada_completa = imagem
                 self.caminho_arquivo_atual = caminho_arquivo
                 self.imagem_resultado_completa = None
                 
-                if self.id_imagem_canvas_original:
-                    self.canvas_imagem_original.delete(self.id_imagem_canvas_original)
-                if self.id_imagem_canvas_resultado:
-                    self.canvas_imagem_resultado.delete(self.id_imagem_canvas_resultado)
-                    self.id_imagem_canvas_resultado = None
+                self.exibir_imagem_no_label(self.label_imagem_original, self.imagem_entrada_completa)
+                self.label_imagem_resultado.clear()
                 
-                self.exibir_imagem_no_canvas(self.canvas_imagem_original, self.imagem_entrada_completa, 'entrada')
-                
-                self.botao_ver_original.configure(state="normal")
-                self.botao_ver_resultado.configure(state="disabled")
-                self.rotulo_status.configure(text=f"Imagem carregada: {os.path.basename(caminho_arquivo)}")
+                self.botao_ver_original.setEnabled(True)
+                self.botao_ver_resultado.setEnabled(False)
+                self.rotulo_status.setText(f"Imagem carregada: {os.path.basename(caminho_arquivo)}")
                 self.atualizar_estados_menu()
                 
             except Exception as e:
-                messagebox.showerror("Erro", f"Falha ao abrir a imagem:\n{e}")
-                self.rotulo_status.configure(text="Erro ao carregar imagem!")
+                QMessageBox.critical(self, "Erro", f"Falha ao abrir a imagem:\n{e}")
+                self.rotulo_status.setText("Erro ao carregar imagem!")
                 self.resetar_estado_interface()
     
-    def redimensionar_previews(self, evento=None):
-        """Redimensiona as imagens de preview quando a janela é redimensionada"""
-        if self.winfo_exists():
-            if self.imagem_entrada_completa:
-                self.exibir_imagem_no_canvas(self.canvas_imagem_original, self.imagem_entrada_completa, 'entrada')
-            if self.imagem_resultado_completa:
-                self.exibir_imagem_no_canvas(self.canvas_imagem_resultado, self.imagem_resultado_completa, 'resultado')
-    
-    def exibir_imagem_no_canvas(self, canvas, imagem_pil, tipo_imagem):
-        """Exibe uma imagem PIL no canvas especificado"""
+    def exibir_imagem_no_label(self, label, imagem_pil):
+        """Exibe uma imagem PIL no label especificado"""
         try:
-            largura_canvas = canvas.winfo_width()
-            altura_canvas = canvas.winfo_height()
+            # Obter o tamanho disponível para exibição
+            largura_disponivel = label.width()
+            altura_disponivel = label.height()
             
-            if largura_canvas <= 1 or altura_canvas <= 1:
-                if self.winfo_exists():
-                    self.after(50, lambda: self.exibir_imagem_no_canvas(canvas, imagem_pil, tipo_imagem))
-                return
+            if largura_disponivel <= 1 or altura_disponivel <= 1:
+                # Se o widget ainda não foi renderizado completamente
+                largura_disponivel = 400
+                altura_disponivel = 300
             
-            imagem_preview = criar_preview(imagem_pil, largura_canvas, altura_canvas)
-            imagem_tk = ImageTk.PhotoImage(imagem_preview)
+            # Criar preview redimensionado
+            imagem_preview = criar_preview(imagem_pil, largura_disponivel, altura_disponivel)
             
-            if tipo_imagem == 'entrada':
-                self.tk_preview_entrada = imagem_tk
-                if self.id_imagem_canvas_original:
-                    canvas.delete(self.id_imagem_canvas_original)
-                self.id_imagem_canvas_original = canvas.create_image(
-                    largura_canvas / 2, altura_canvas / 2, 
-                    anchor='center', image=imagem_tk
-                )
-                
-            elif tipo_imagem == 'resultado':
-                self.tk_preview_resultado = imagem_tk
-                if self.id_imagem_canvas_resultado:
-                    canvas.delete(self.id_imagem_canvas_resultado)
-                self.id_imagem_canvas_resultado = canvas.create_image(
-                    largura_canvas / 2, altura_canvas / 2, 
-                    anchor='center', image=imagem_tk
-                )
-                
+            # Converter de PIL para QPixmap
+            q_imagem = ImageQt.ImageQt(imagem_preview)
+            pixmap = QPixmap.fromImage(q_imagem)
+            
+            # Definir a imagem no label
+            label.setPixmap(pixmap)
+            
         except Exception as e:
-            print(f"Erro ao exibir imagem no canvas ({tipo_imagem}): {e}")
+            print(f"Erro ao exibir imagem no label: {e}")
     
     def abrir_ferramenta_recorte(self):
         """Abre a janela para recortar a imagem original"""
         if not self.imagem_entrada_completa:
-            messagebox.showwarning("Atenção", "Nenhuma imagem carregada para recorte!")
+            QMessageBox.warning(self, "Atenção", "Nenhuma imagem carregada para recorte!")
             return
             
-        JanelaRecorte(self, self.imagem_entrada_completa, self.aplicar_recorte)
+        janela_recorte = JanelaRecorte(self, self.imagem_entrada_completa, self.aplicar_recorte)
+        janela_recorte.exec()
     
     def aplicar_recorte(self, imagem_recortada, caixa_recorte=None):
         """Callback chamado quando o recorte é concluído"""
         self.imagem_entrada_completa = imagem_recortada
-        self.exibir_imagem_no_canvas(self.canvas_imagem_original, self.imagem_entrada_completa, 'entrada')
+        self.exibir_imagem_no_label(self.label_imagem_original, self.imagem_entrada_completa)
         self.atualizar_estados_menu()
         self.imagem_resultado_completa = None
-        if self.id_imagem_canvas_resultado:
-            self.canvas_imagem_resultado.delete(self.id_imagem_canvas_resultado)
-            self.id_imagem_canvas_resultado = None
-            
-        self.botao_ver_resultado.configure(state="disabled")
-        self.rotulo_status.configure(text="Imagem recortada com sucesso.")
+        self.label_imagem_resultado.clear()
+        
+        self.botao_ver_resultado.setEnabled(False)
+        self.rotulo_status.setText("Imagem recortada com sucesso.")
     
     def abrir_ferramenta_borracha(self):
         """Abre a janela para apagar áreas da imagem com uma borracha"""
         if not self.imagem_entrada_completa:
-            messagebox.showwarning("Atenção", "Nenhuma imagem carregada para edição!")
+            QMessageBox.warning(self, "Atenção", "Nenhuma imagem carregada para edição!")
             return
             
-        JanelaBorracha(self, self.imagem_entrada_completa, self.aplicar_borracha)
+        janela_borracha = JanelaBorracha(self, self.imagem_entrada_completa, self.aplicar_borracha)
+        janela_borracha.exec()
     
     def aplicar_borracha(self, imagem_editada):
         """Callback chamado quando a edição com borracha é concluída"""
         self.imagem_entrada_completa = imagem_editada
-        self.exibir_imagem_no_canvas(self.canvas_imagem_original, self.imagem_entrada_completa, 'entrada')
+        self.exibir_imagem_no_label(self.label_imagem_original, self.imagem_entrada_completa)
         self.atualizar_estados_menu()
         self.imagem_resultado_completa = None
-        if self.id_imagem_canvas_resultado:
-            self.canvas_imagem_resultado.delete(self.id_imagem_canvas_resultado)
-            self.id_imagem_canvas_resultado = None
-            
-        self.botao_ver_resultado.configure(state="disabled")
-        self.rotulo_status.configure(text="Imagem editada com sucesso.")
+        self.label_imagem_resultado.clear()
+        
+        self.botao_ver_resultado.setEnabled(False)
+        self.rotulo_status.setText("Imagem editada com sucesso.")
     
     def processar_imagem(self):
         """Processa a imagem para remover o fundo"""
         if not self.imagem_entrada_completa:
-            messagebox.showwarning("Atenção", "Selecione uma imagem primeiro!")
+            QMessageBox.warning(self, "Atenção", "Selecione uma imagem primeiro!")
             return
             
         if self.processamento_ativo:
-            messagebox.showwarning("Atenção", "Aguarde o processamento atual terminar.")
+            QMessageBox.warning(self, "Atenção", "Aguarde o processamento atual terminar.")
             return
             
-        def executar_processamento():
-            self.processamento_ativo = True
-            self.definir_interface_processando(True)
-            self.after(0, lambda: self.rotulo_status.configure(
-                text=f"Processando com modelo '{self.modelo_selecionado_var.get()}'..."))
-            self.after(0, self.update)
-            
-            try:
-                # Obter valores de configuração
-                usar_alpha_matting = self.alpha_matting_var.get()
-                limiar_objeto = self.limiar_objeto_var.get()
-                limiar_fundo = self.limiar_fundo_var.get()
-                tamanho_erosao = self.erosao_tamanho_var.get()
-                
-                # Processar a imagem
-                imagem_resultado = self.removedor.processar_imagem(
-                    self.imagem_entrada_completa,
-                    usar_alpha_matting,
-                    limiar_objeto,
-                    limiar_fundo,
-                    tamanho_erosao
-                )
-                
-                self.imagem_resultado_completa = imagem_resultado
-                self.after(0, self.atualizar_interface_apos_processamento)
-                
-            except Exception as e:
-                mensagem_erro = f"Falha ao remover o fundo:\n{e}"
-                self.after(0, lambda: messagebox.showerror("Erro de Processamento", mensagem_erro))
-                self.after(0, lambda: self.rotulo_status.configure(text="Erro no processamento!"))
-            finally:
-                self.processamento_ativo = False
-                self.after(0, lambda: self.definir_interface_processando(False))
+        # Obter valores de configuração
+        usar_alpha_matting = self.check_alpha_matting.isChecked()
+        limiar_objeto = self.slider_limiar_objeto.value()
+        limiar_fundo = self.slider_limiar_fundo.value()
+        tamanho_erosao = self.slider_erosao.value()
         
-        threading.Thread(target=executar_processamento, daemon=True).start()
+        # Iniciar thread de processamento
+        self.processamento_ativo = True
+        self.definir_interface_processando(True)
+        self.rotulo_status.setText(f"Processando com modelo '{self.modelo_selecionado}'...")
+        
+        # Criar thread de processamento
+        self.thread_processamento = ProcessadorThread(
+            self.removedor.processar_imagem,
+            self.imagem_entrada_completa,
+            usar_alpha_matting,
+            limiar_objeto,
+            limiar_fundo,
+            tamanho_erosao
+        )
+        
+        # Conectar sinais
+        self.thread_processamento.concluido.connect(self.finalizar_processamento)
+        self.thread_processamento.erro.connect(self.erro_processamento)
+        
+        # Iniciar thread
+        self.thread_processamento.start()
     
-    def atualizar_interface_apos_processamento(self):
-        """Atualiza a interface após o processamento ser concluído"""
-        if self.imagem_resultado_completa:
-            self.exibir_imagem_no_canvas(self.canvas_imagem_resultado, self.imagem_resultado_completa, 'resultado')
-            self.rotulo_status.configure(text="Processamento concluído!")
-            self.botao_ver_resultado.configure(state="normal")
-        else:
-            self.rotulo_status.configure(text="Falha ao gerar resultado.")
+    def finalizar_processamento(self, imagem_resultado):
+        """Chamado quando o processamento é concluído com sucesso"""
+        self.imagem_resultado_completa = imagem_resultado
+        self.exibir_imagem_no_label(self.label_imagem_resultado, self.imagem_resultado_completa)
+        self.rotulo_status.setText("Processamento concluído!")
+        self.botao_ver_resultado.setEnabled(True)
+        
+        self.processamento_ativo = False
+        self.definir_interface_processando(False)
         self.atualizar_estados_menu()
+    
+    def erro_processamento(self, mensagem_erro):
+        """Chamado quando ocorre um erro durante o processamento"""
+        QMessageBox.critical(self, "Erro de Processamento", f"Falha ao remover o fundo:\n{mensagem_erro}")
+        self.rotulo_status.setText("Erro no processamento!")
+        
+        self.processamento_ativo = False
+        self.definir_interface_processando(False)
     
     def definir_interface_processando(self, processando):
         """Atualiza o estado da interface durante o processamento"""
-        estado = "disabled" if processando else "normal"
-        self.barra_menu.entryconfig("Arquivo", state=estado)
-        self.barra_menu.entryconfig("Ferramentas", state=estado)
-        self.barra_menu.entryconfig("Ajuda", state=estado)
+        estado = not processando  # True se não estiver processando
+        
+        # Atualizar estado dos menus
+        self.menu_arquivo.setEnabled(estado)
+        self.menu_ferramentas.setEnabled(estado)
+        self.menu_ajuda.setEnabled(estado)
+        
+        # Exibir ou ocultar a barra de progresso
+        self.barra_progresso.setVisible(processando)
+        if processando:
+            self.barra_progresso.setValue(0)
     
     def resetar_estado_interface(self):
         """Reseta o estado da interface"""
@@ -556,21 +586,13 @@ class AplicativoRemoveFundo(ctk.CTk):
         self.imagem_resultado_completa = None
         self.caminho_arquivo_atual = None
         
-        if self.id_imagem_canvas_original:
-            self.canvas_imagem_original.delete(self.id_imagem_canvas_original)
-            self.id_imagem_canvas_original = None
-            
-        if self.id_imagem_canvas_resultado:
-            self.canvas_imagem_resultado.delete(self.id_imagem_canvas_resultado)
-            self.id_imagem_canvas_resultado = None
-            
-        self.tk_preview_entrada = None
-        self.tk_preview_resultado = None
+        self.label_imagem_original.clear()
+        self.label_imagem_resultado.clear()
         
         self.definir_interface_processando(False)
-        self.rotulo_status.configure(text="Pronto")
-        self.botao_ver_original.configure(state="disabled")
-        self.botao_ver_resultado.configure(state="disabled")
+        self.rotulo_status.setText("Pronto")
+        self.botao_ver_original.setEnabled(False)
+        self.botao_ver_resultado.setEnabled(False)
         self.atualizar_estados_menu()
     
     def salvar_imagem(self):
@@ -580,169 +602,123 @@ class AplicativoRemoveFundo(ctk.CTk):
         elif self.imagem_entrada_completa:
             imagem_para_salvar = self.imagem_entrada_completa
         else:
-            messagebox.showwarning("Atenção", "Não há imagem processada ou editada para salvar!")
+            QMessageBox.warning(self, "Atenção", "Não há imagem processada ou editada para salvar!")
             return
             
         if self.processamento_ativo:
-            messagebox.showwarning("Atenção", "Aguarde o processamento atual terminar.")
+            QMessageBox.warning(self, "Atenção", "Aguarde o processamento atual terminar.")
             return
             
         nome_arquivo_original = os.path.basename(self.caminho_arquivo_atual or "imagem")
         nome, _ = os.path.splitext(nome_arquivo_original)
         nome_padrao = f"{nome}_editado.png"
         
-        caminho_arquivo = filedialog.asksaveasfilename(
-            title="Salvar Imagem",
-            initialfile=nome_padrao,
-            defaultextension=".png",
-            filetypes=[("Arquivos PNG", "*.png")]
+        caminho_arquivo, _ = QFileDialog.getSaveFileName(
+            self, "Salvar Imagem", nome_padrao, "Arquivos PNG (*.png)"
         )
         
         if caminho_arquivo:
             try:
-                self.rotulo_status.configure(text="Salvando imagem...")
-                self.update()
+                self.rotulo_status.setText("Salvando imagem...")
                 imagem_para_salvar.save(caminho_arquivo)
-                self.rotulo_status.configure(text="Imagem salva com sucesso!")
+                self.rotulo_status.setText("Imagem salva com sucesso!")
             except Exception as e:
-                messagebox.showerror("Erro", f"Falha ao salvar a imagem:\n{e}")
-                self.rotulo_status.configure(text="Erro ao salvar!")
+                QMessageBox.critical(self, "Erro", f"Falha ao salvar a imagem:\n{e}")
+                self.rotulo_status.setText("Erro ao salvar!")
     
     def restaurar_padroes(self):
         """Restaura as configurações para os valores padrão"""
         # Modelo
-        self.modelo_selecionado_var.set(MODELO_PADRAO)
-        self.menu_modelo.set(MODELO_PADRAO)
+        self.modelo_selecionado = MODELO_PADRAO
+        self.combo_modelo.setCurrentText(MODELO_PADRAO)
         
         try:
             self.removedor.mudar_modelo(MODELO_PADRAO)
             print("Sessão rembg restaurada para o padrão:", MODELO_PADRAO)
         except Exception as e:
-            messagebox.showerror("Erro", f"Falha ao restaurar o modelo padrão:\n{e}")
+            QMessageBox.critical(self, "Erro", f"Falha ao restaurar o modelo padrão:\n{e}")
         
         # Outros controles
-        self.alpha_matting_var.set(ALPHA_MATTING_PADRAO)
-        self.limiar_objeto_var.set(LIMIAR_OBJETO_PADRAO)
-        self.limiar_fundo_var.set(LIMIAR_FUNDO_PADRAO)
-        self.erosao_tamanho_var.set(EROSAO_MASCARA_PADRAO)
+        self.check_alpha_matting.setChecked(ALPHA_MATTING_PADRAO)
+        self.slider_limiar_objeto.setValue(LIMIAR_OBJETO_PADRAO)
+        self.slider_limiar_fundo.setValue(LIMIAR_FUNDO_PADRAO)
+        self.slider_erosao.setValue(EROSAO_MASCARA_PADRAO)
         
         # Atualizar rótulos
-        self.rotulo_limiar_objeto.configure(text=f"Limiar Objeto: {self.limiar_objeto_var.get()}")
-        self.rotulo_limiar_fundo.configure(text=f"Limiar Fundo: {self.limiar_fundo_var.get()}")
-        self.rotulo_erosao.configure(text=f"Erosão Máscara: {self.erosao_tamanho_var.get()}")
+        self.rotulo_limiar_objeto.setText(f"Limiar Objeto: {LIMIAR_OBJETO_PADRAO}")
+        self.rotulo_limiar_fundo.setText(f"Limiar Fundo: {LIMIAR_FUNDO_PADRAO}")
+        self.rotulo_erosao.setText(f"Erosão Máscara: {EROSAO_MASCARA_PADRAO}")
         
-        if self.imagem_entrada_completa and not self.processamento_ativo:
-            self.atualizar_estados_menu()
-        
-        self.rotulo_status.configure(text="Valores restaurados para os padrões.")
+        self.rotulo_status.setText("Valores restaurados para os padrões.")
     
     def processar_pasta(self):
         """Abre diálogos para processar todas as imagens em uma pasta"""
         if self.processamento_ativo:
-            messagebox.showwarning("Atenção", "Aguarde o processamento atual terminar.")
+            QMessageBox.warning(self, "Atenção", "Aguarde o processamento atual terminar.")
             return
             
-        pasta_origem = filedialog.askdirectory(title="Selecione a Pasta com Imagens")
+        pasta_origem = QFileDialog.getExistingDirectory(
+            self, "Selecione a Pasta com Imagens"
+        )
         if not pasta_origem: 
             return
             
-        pasta_destino = filedialog.askdirectory(title="Selecione a Pasta de Destino")
+        pasta_destino = QFileDialog.getExistingDirectory(
+            self, "Selecione a Pasta de Destino"
+        )
         if not pasta_destino: 
             return
             
         if pasta_origem == pasta_destino:
-            messagebox.showerror("Erro", "A pasta de origem e destino não podem ser a mesma.")
+            QMessageBox.critical(self, "Erro", "A pasta de origem e destino não podem ser a mesma.")
             return
         
         # Identificar as imagens na pasta
         imagens = [f for f in os.listdir(pasta_origem) 
                    if os.path.isfile(os.path.join(pasta_origem, f)) 
-                   and f.lower().endswith(EXTENSOES_SUPORTADAS)]
+                   and f.lower().endswith(tuple(EXTENSOES_SUPORTADAS))]
                    
         if not imagens:
-            messagebox.showinfo("Informação", "Nenhuma imagem compatível encontrada na pasta selecionada.")
+            QMessageBox.information(self, "Informação", "Nenhuma imagem compatível encontrada na pasta selecionada.")
             return
             
         total_arquivos = len(imagens)
-        nome_modelo = self.modelo_selecionado_var.get()
+        nome_modelo = self.modelo_selecionado
         
         # Preparar interface para processamento
-        self.definir_interface_processando(True)
-        self.barra_progresso.grid(row=1, column=0, padx=10, pady=(0,5), sticky="ew")
-        self.barra_progresso.set(0)
-        self.rotulo_status.configure(text=f"Iniciando lote ({nome_modelo}): {total_arquivos} imagens...")
-        self.update()
-        
-        def processar_lote():
-            # Obter configurações atuais
-            usar_alpha_matting = self.alpha_matting_var.get()
-            limiar_objeto = self.limiar_objeto_var.get()
-            limiar_fundo = self.limiar_fundo_var.get()
-            tamanho_erosao = self.erosao_tamanho_var.get()
-            
-            processados = 0
-            erros = []
-            
-            for i, nome_arquivo in enumerate(imagens):
-                caminho_entrada = os.path.join(pasta_origem, nome_arquivo)
-                nome_saida = f"{os.path.splitext(nome_arquivo)[0]}_{nome_modelo}_sem_fundo.png"
-                caminho_saida = os.path.join(pasta_destino, nome_saida)
-                
-                # Atualizar progresso
-                progresso = (i + 1) / total_arquivos
-                status_texto = f"Lote ({nome_modelo}) {i+1}/{total_arquivos}: {nome_arquivo}"
-                self.after(0, self.atualizar_progresso_lote, progresso, status_texto)
-                
-                try:
-                    # Carregar a imagem original e mostrar preview
-                    imagem = carregar_imagem(caminho_entrada)
-                    
-                    # Exibir preview da imagem original
-                    self.after(0, lambda img=imagem: self.exibir_imagem_no_canvas(
-                        self.canvas_imagem_original, img, 'entrada'))
-                    self.after(0, self.update)  # Forçar atualização da interface
-                    
-                    # Processar a imagem e mostrar resultado
-                    imagem_resultado = self.removedor.processar_imagem(
-                        imagem, usar_alpha_matting, limiar_objeto, limiar_fundo, tamanho_erosao
-                    )
-                    
-                    # Exibir preview do resultado
-                    self.after(0, lambda img=imagem_resultado: self.exibir_imagem_no_canvas(
-                        self.canvas_imagem_resultado, img, 'resultado'))
-                    self.after(0, self.update)  # Forçar atualização da interface
-                    
-                    # Salvar o resultado
-                    imagem_resultado.save(caminho_saida)
-                    processados += 1
-                    
-                except Exception as e:
-                    erro_msg = f"'{nome_arquivo}': {e}"
-                    erros.append(erro_msg)
-                    print(f"Erro ao processar {nome_arquivo}: {e}")
-            
-            # Atualizar interface após conclusão
-            self.after(0, self.finalizar_processamento_lote, 
-                    processados, total_arquivos, erros, nome_modelo)
-        
         self.processamento_ativo = True
-        threading.Thread(target=processar_lote, daemon=True).start()
+        self.definir_interface_processando(True)
+        self.barra_progresso.setVisible(True)
+        self.barra_progresso.setValue(0)
+        self.rotulo_status.setText(f"Iniciando lote ({nome_modelo}): {total_arquivos} imagens...")
+        
+        # Criar thread do processador de lotes
+        self.thread_lote = ProcessadorLoteThread(
+            self, pasta_origem, pasta_destino, imagens, 
+            self.modelo_selecionado, self.check_alpha_matting.isChecked(),
+            self.slider_limiar_objeto.value(), self.slider_limiar_fundo.value(),
+            self.slider_erosao.value()
+        )
+        
+        # Conectar sinais
+        self.thread_lote.progresso.connect(self.atualizar_progresso_lote)
+        self.thread_lote.concluido.connect(self.finalizar_processamento_lote)
+        
+        # Iniciar o thread
+        self.thread_lote.start()
     
     def atualizar_progresso_lote(self, valor_progresso, texto_status):
         """Atualiza a barra de progresso e o status durante processamento em lote"""
-        if self.winfo_exists():
-            self.barra_progresso.set(valor_progresso)
-            self.rotulo_status.configure(text=texto_status)
+        self.barra_progresso.setValue(int(valor_progresso * 100))
+        self.rotulo_status.setText(texto_status)
     
-    def finalizar_processamento_lote(self, processados, total, erros, nome_modelo):
+    def finalizar_processamento_lote(self, resultado):
         """Finaliza o processamento em lote e atualiza a interface"""
-        if not self.winfo_exists(): 
-            return
-            
         self.processamento_ativo = False
         self.definir_interface_processando(False)
-        self.barra_progresso.grid_remove()
-        self.barra_progresso.set(0)
+        self.barra_progresso.setVisible(False)
+        
+        processados, total, erros, nome_modelo = resultado
         
         mensagem_final = f"Processamento em lote ({nome_modelo}) concluído.\n"
         mensagem_final += f"{processados}/{total} imagem(ns) processada(s) com sucesso!"
@@ -756,11 +732,11 @@ class AplicativoRemoveFundo(ctk.CTk):
             if len(erros) > 5:
                 mensagem_final += "\n- ... (veja o console/log para mais detalhes)"
                 
-            messagebox.showwarning("Lote Concluído com Erros", mensagem_final)
+            QMessageBox.warning(self, "Lote Concluído com Erros", mensagem_final)
         else:
-            messagebox.showinfo("Lote Concluído", mensagem_final)
+            QMessageBox.information(self, "Lote Concluído", mensagem_final)
             
-        self.rotulo_status.configure(text=texto_status)
+        self.rotulo_status.setText(texto_status)
     
     def mostrar_imagem_completa(self, tipo_imagem):
         """Abre uma janela para exibir a imagem em tamanho completo"""
@@ -775,28 +751,31 @@ class AplicativoRemoveFundo(ctk.CTk):
             titulo = f"Original - {os.path.basename(self.caminho_arquivo_atual or '')}"
         elif tipo_imagem == 'resultado' and self.imagem_resultado_completa:
             imagem_para_mostrar = self.imagem_resultado_completa
-            titulo = f"Resultado ({self.modelo_selecionado_var.get()}) - {os.path.basename(self.caminho_arquivo_atual or '')}"
+            titulo = f"Resultado ({self.modelo_selecionado}) - {os.path.basename(self.caminho_arquivo_atual or '')}"
         else:
             return
             
         try:
             # Criar a janela visualizadora
-            VisualizadorImagem(self, imagem_para_mostrar, titulo)
+            visualizador = VisualizadorImagem(self, imagem_para_mostrar, titulo)
+            visualizador.exec()
         except Exception as e:
-            messagebox.showerror("Erro de Visualização", 
-                               f"Não foi possível exibir a imagem em tamanho real:\n{e}")
+            QMessageBox.critical(self, "Erro de Visualização", 
+                                 f"Não foi possível exibir a imagem em tamanho real:\n{e}")
     
     def recortar_imagens_em_massa(self):
         """Permite recortar várias imagens com base em uma área de recorte definida em uma imagem modelo"""
         # Selecionar pasta de origem
-        pasta_origem = filedialog.askdirectory(title="Selecione a Pasta com Imagens")
+        pasta_origem = QFileDialog.getExistingDirectory(
+            self, "Selecione a Pasta com Imagens"
+        )
         if not pasta_origem:
             return
             
         # Selecionar imagem modelo
-        modelo_caminho = filedialog.askopenfilename(
-            title="Selecione a Imagem Modelo",
-            filetypes=[("Arquivos de Imagem", " ".join(f"*{ext}" for ext in EXTENSOES_SUPORTADAS))]
+        tipos_arquivo = f"Arquivos de Imagem ({' '.join(['*' + ext for ext in EXTENSOES_SUPORTADAS])})"
+        modelo_caminho, _ = QFileDialog.getOpenFileName(
+            self, "Selecione a Imagem Modelo", "", tipos_arquivo
         )
         
         if not modelo_caminho:
@@ -806,7 +785,7 @@ class AplicativoRemoveFundo(ctk.CTk):
             imagem_modelo = carregar_imagem(modelo_caminho)
             
             # Criar pasta de destino
-            pasta_destino = os.path.join(pasta_origem, "recorte output")
+            pasta_destino = os.path.join(pasta_origem, "recorte_output")
             os.makedirs(pasta_destino, exist_ok=True)
             
             # Função de callback que recebe tanto a imagem quanto a caixa de recorte
@@ -815,79 +794,50 @@ class AplicativoRemoveFundo(ctk.CTk):
                     self.iniciar_recorte_em_massa(pasta_origem, pasta_destino, caixa_recorte)
             
             # Abre a janela de recorte
-            JanelaRecorte(self, imagem_modelo, callback_recorte)
+            janela_recorte = JanelaRecorte(self, imagem_modelo, callback_recorte)
+            janela_recorte.exec()
             
         except Exception as e:
-            messagebox.showerror("Erro", f"Falha ao abrir a imagem modelo:\n{e}")
+            QMessageBox.critical(self, "Erro", f"Falha ao abrir a imagem modelo:\n{e}")
     
     def iniciar_recorte_em_massa(self, pasta_origem, pasta_destino, caixa_recorte):
         """Inicia o processamento de recorte em massa"""
         imagens = [f for f in os.listdir(pasta_origem) 
                    if os.path.isfile(os.path.join(pasta_origem, f)) 
-                   and f.lower().endswith(EXTENSOES_SUPORTADAS)]
+                   and f.lower().endswith(tuple(EXTENSOES_SUPORTADAS))]
         
         total_arquivos = len(imagens)
         
         if total_arquivos == 0:
-            messagebox.showinfo("Informação", "Nenhuma imagem compatível encontrada na pasta.")
+            QMessageBox.information(self, "Informação", "Nenhuma imagem compatível encontrada na pasta.")
             return
             
         # Preparar interface para processamento
-        self.definir_interface_processando(True)
-        self.barra_progresso.grid(row=1, column=0, padx=10, pady=(0,5), sticky="ew")
-        self.barra_progresso.set(0)
-        self.rotulo_status.configure(text=f"Iniciando recorte em massa: {total_arquivos} imagens...")
-        self.update()
-        
-        def executar_recorte_massa():
-            processados = 0
-            erros = []
-            
-            for i, nome_arquivo in enumerate(imagens):
-                try:
-                    caminho_entrada = os.path.join(pasta_origem, nome_arquivo)
-                    nome_base, extensao = os.path.splitext(nome_arquivo)
-                    caminho_saida = os.path.join(pasta_destino, f"{nome_base}-recortado.png")
-                    
-                    # Atualizar progresso
-                    progresso = (i + 1) / total_arquivos
-                    texto_status = f"Recorte em massa {i+1}/{total_arquivos}: {nome_arquivo}"
-                    self.after(0, self.atualizar_progresso_lote, progresso, texto_status)
-                    
-                    # Carregar e processar a imagem
-                    imagem = carregar_imagem(caminho_entrada)
-                    
-                    # Exibir preview da imagem original
-                    self.after(0, lambda img=imagem: self.exibir_imagem_no_canvas(
-                        self.canvas_imagem_original, img, 'entrada'))
-                    
-                    # Recortar a imagem
-                    imagem_recortada = EditorImagem.recortar_imagem(imagem, caixa_recorte)
-                    
-                    # Exibir preview do resultado
-                    self.after(0, lambda img=imagem_recortada: self.exibir_imagem_no_canvas(
-                        self.canvas_imagem_resultado, img, 'resultado'))
-                    
-                    # Salvar o resultado
-                    imagem_recortada.save(caminho_saida)
-                    processados += 1
-                    
-                except Exception as e:
-                    erro_msg = f"{nome_arquivo}: {str(e)}"
-                    erros.append(erro_msg)
-                    print(f"Erro ao processar {nome_arquivo}: {e}")
-            
-            self.after(0, self.finalizar_recorte_em_massa, processados, total_arquivos, erros)
-            
         self.processamento_ativo = True
-        threading.Thread(target=executar_recorte_massa, daemon=True).start()
+        self.definir_interface_processando(True)
+        self.barra_progresso.setVisible(True)
+        self.barra_progresso.setValue(0)
+        self.rotulo_status.setText(f"Iniciando recorte em massa: {total_arquivos} imagens...")
+        
+        # Criar thread para processamento
+        self.thread_recorte = RecorteMassaThread(
+            self, pasta_origem, pasta_destino, imagens, caixa_recorte
+        )
+        
+        # Conectar sinais
+        self.thread_recorte.progresso.connect(self.atualizar_progresso_lote)
+        self.thread_recorte.concluido.connect(self.finalizar_recorte_em_massa)
+        
+        # Iniciar o thread
+        self.thread_recorte.start()
     
-    def finalizar_recorte_em_massa(self, processados, total, erros):
+    def finalizar_recorte_em_massa(self, resultado):
         """Finaliza o recorte em massa e exibe o resultado"""
         self.processamento_ativo = False
         self.definir_interface_processando(False)
-        self.barra_progresso.grid_remove()
-        self.barra_progresso.set(0)
+        self.barra_progresso.setVisible(False)
+        
+        processados, total, erros = resultado
         
         mensagem_final = f"Recorte em massa concluído.\n{processados}/{total} imagem(ns) processada(s) com sucesso."
         
@@ -897,8 +847,109 @@ class AplicativoRemoveFundo(ctk.CTk):
             if len(erros) > 5:
                 mensagem_final += "\n... (veja o console para mais detalhes)"
                 
-            messagebox.showwarning("Concluído com Erros", mensagem_final)
+            QMessageBox.warning(self, "Concluído com Erros", mensagem_final)
         else:
-            messagebox.showinfo("Concluído", mensagem_final)
+            QMessageBox.information(self, "Concluído", mensagem_final)
             
-        self.rotulo_status.configure(text="Recorte em massa concluído.")
+        self.rotulo_status.setText("Recorte em massa concluído.")
+
+
+class ProcessadorLoteThread(QThread):
+    """Thread para processar imagens em lote"""
+    progresso = pyqtSignal(float, str)
+    concluido = pyqtSignal(tuple)
+    
+    def __init__(self, parent, pasta_origem, pasta_destino, arquivos, 
+                 modelo, alpha_matting, limiar_objeto, limiar_fundo, erosao):
+        super().__init__(parent)
+        self.pasta_origem = pasta_origem
+        self.pasta_destino = pasta_destino
+        self.arquivos = arquivos
+        self.modelo = modelo
+        self.alpha_matting = alpha_matting
+        self.limiar_objeto = limiar_objeto
+        self.limiar_fundo = limiar_fundo
+        self.erosao = erosao
+        self.parent = parent
+        
+    def run(self):
+        removedor = RemoveFundo(self.modelo)
+        processados = 0
+        erros = []
+        total = len(self.arquivos)
+        
+        for i, nome_arquivo in enumerate(self.arquivos):
+            caminho_entrada = os.path.join(self.pasta_origem, nome_arquivo)
+            nome_saida = f"{os.path.splitext(nome_arquivo)[0]}_{self.modelo}_sem_fundo.png"
+            caminho_saida = os.path.join(self.pasta_destino, nome_saida)
+            
+            # Atualizar progresso
+            progresso = (i + 1) / total
+            status_texto = f"Lote ({self.modelo}) {i+1}/{total}: {nome_arquivo}"
+            self.progresso.emit(progresso, status_texto)
+            
+            try:
+                # Carregar imagem e processar
+                imagem = carregar_imagem(caminho_entrada)
+                imagem_resultado = removedor.processar_imagem(
+                    imagem, self.alpha_matting, self.limiar_objeto, 
+                    self.limiar_fundo, self.erosao
+                )
+                
+                # Salvar resultado
+                imagem_resultado.save(caminho_saida)
+                processados += 1
+                
+            except Exception as e:
+                erro_msg = f"'{nome_arquivo}': {e}"
+                erros.append(erro_msg)
+                print(f"Erro ao processar {nome_arquivo}: {e}")
+        
+        # Emitir resultado final
+        self.concluido.emit((processados, total, erros, self.modelo))
+
+
+class RecorteMassaThread(QThread):
+    """Thread para recortar imagens em massa"""
+    progresso = pyqtSignal(float, str)
+    concluido = pyqtSignal(tuple)
+    
+    def __init__(self, parent, pasta_origem, pasta_destino, arquivos, caixa_recorte):
+        super().__init__(parent)
+        self.pasta_origem = pasta_origem
+        self.pasta_destino = pasta_destino
+        self.arquivos = arquivos
+        self.caixa_recorte = caixa_recorte
+        self.parent = parent
+        
+    def run(self):
+        processados = 0
+        erros = []
+        total = len(self.arquivos)
+        
+        for i, nome_arquivo in enumerate(self.arquivos):
+            try:
+                caminho_entrada = os.path.join(self.pasta_origem, nome_arquivo)
+                nome_base, extensao = os.path.splitext(nome_arquivo)
+                caminho_saida = os.path.join(self.pasta_destino, f"{nome_base}-recortado.png")
+                
+                # Atualizar progresso
+                progresso = (i + 1) / total
+                texto_status = f"Recorte em massa {i+1}/{total}: {nome_arquivo}"
+                self.progresso.emit(progresso, texto_status)
+                
+                # Carregar e recortar a imagem
+                imagem = carregar_imagem(caminho_entrada)
+                imagem_recortada = EditorImagem.recortar_imagem(imagem, self.caixa_recorte)
+                
+                # Salvar o resultado
+                imagem_recortada.save(caminho_saida)
+                processados += 1
+                
+            except Exception as e:
+                erro_msg = f"{nome_arquivo}: {str(e)}"
+                erros.append(erro_msg)
+                print(f"Erro ao processar {nome_arquivo}: {e}")
+        
+        # Emitir resultado final
+        self.concluido.emit((processados, total, erros))

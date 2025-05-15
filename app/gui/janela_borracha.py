@@ -1,87 +1,73 @@
-import customtkinter as ctk
-from tkinter import Canvas, Scrollbar
-from PIL import Image, ImageTk, ImageDraw
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QScrollArea, 
+                           QLabel, QPushButton, QWidget, QFrame, QSlider)
+from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QBrush
+from PIL import Image, ImageQt, ImageDraw
 
-class JanelaBorracha(ctk.CTkToplevel):
-    def __init__(self, master, imagem, callback_concluido):
-        super().__init__(master)
-        self.title("Ferramenta de Borracha")
-        self.geometry("800x600")
-        self.grab_set()
+class JanelaBorracha(QDialog):
+    def __init__(self, parent, imagem, callback_concluido):
+        super().__init__(parent)
+        self.setWindowTitle("Ferramenta de Borracha")
+        self.resize(800, 600)
+        self.setModal(True)
         
         self.imagem_original = imagem
         self.imagem_editavel = imagem.copy()
         self.callback_concluido = callback_concluido
         self.zoom_atual = 1.0
         self.tamanho_borracha = 20
-        self.circulo_cursor = None
         
-        # Frame principal do canvas
-        self.frame_canvas = ctk.CTkFrame(self)
-        self.frame_canvas.pack(fill="both", expand=True)
+        # Layout principal
+        self.layout_principal = QVBoxLayout(self)
         
-        # Canvas com scrollbars
-        self.canvas = Canvas(self.frame_canvas, bg='white')
-        self.canvas.grid(row=0, column=0, sticky="nsew")
+        # Widget de canvas para desenhar
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
         
-        self.rolagem_h = Scrollbar(self.frame_canvas, orient="horizontal", command=self.canvas.xview)
-        self.rolagem_h.grid(row=1, column=0, sticky="ew")
+        # Widget personalizado para desenhar
+        self.area_desenho = AreaDesenhoBorracha(self)
+        self.scroll_area.setWidget(self.area_desenho)
         
-        self.rolagem_v = Scrollbar(self.frame_canvas, orient="vertical", command=self.canvas.yview)
-        self.rolagem_v.grid(row=0, column=1, sticky="ns")
-        
-        self.canvas.configure(xscrollcommand=self.rolagem_h.set, yscrollcommand=self.rolagem_v.set)
-        
-        # Configuração do layout
-        self.frame_canvas.grid_rowconfigure(0, weight=1)
-        self.frame_canvas.grid_columnconfigure(0, weight=1)
-        
-        # Exibe a imagem inicial
-        self.atualizar_canvas()
-        
-        # Eventos do mouse para a borracha
-        self.canvas.bind("<B1-Motion>", self.apagar)
-        self.canvas.bind("<ButtonPress-1>", self.apagar)
-        self.canvas.bind("<Motion>", self.mostrar_cursor)
-        self.canvas.bind("<Leave>", self.esconder_cursor)
-        self.canvas.bind("<MouseWheel>", self.ao_rolar_mouse)
+        self.layout_principal.addWidget(self.scroll_area)
         
         # Frame de controles
-        self.frame_controles = ctk.CTkFrame(self)
-        self.frame_controles.pack(pady=5)
+        self.frame_controles = QWidget()
+        self.layout_controles = QHBoxLayout(self.frame_controles)
         
         # Slider para o tamanho da borracha
-        ctk.CTkLabel(self.frame_controles, text="Tamanho da Borracha:").pack(side="left", padx=5)
-        self.slider_tamanho = ctk.CTkSlider(
-            self.frame_controles, 
-            from_=5, 
-            to=100, 
-            number_of_steps=95, 
-            command=self.atualizar_tamanho_borracha
-        )
-        self.slider_tamanho.set(self.tamanho_borracha)
-        self.slider_tamanho.pack(side="left", padx=5)
+        self.layout_controles.addWidget(QLabel("Tamanho da Borracha:"))
+        
+        self.slider_tamanho = QSlider(Qt.Orientation.Horizontal)
+        self.slider_tamanho.setRange(5, 100)
+        self.slider_tamanho.setValue(self.tamanho_borracha)
+        self.slider_tamanho.valueChanged.connect(self.atualizar_tamanho_borracha)
+        self.layout_controles.addWidget(self.slider_tamanho)
         
         # Botões de zoom
-        self.botao_zoom_mais = ctk.CTkButton(self.frame_controles, text="Zoom +", 
-                                           command=lambda: self.zoom(1.2))
-        self.botao_zoom_mais.pack(side="left", padx=5)
+        self.botao_zoom_mais = QPushButton("Zoom +")
+        self.botao_zoom_mais.clicked.connect(lambda: self.zoom(1.2))
+        self.layout_controles.addWidget(self.botao_zoom_mais)
         
-        self.botao_zoom_menos = ctk.CTkButton(self.frame_controles, text="Zoom -", 
-                                            command=lambda: self.zoom(0.8))
-        self.botao_zoom_menos.pack(side="left", padx=5)
+        self.botao_zoom_menos = QPushButton("Zoom -")
+        self.botao_zoom_menos.clicked.connect(lambda: self.zoom(0.8))
+        self.layout_controles.addWidget(self.botao_zoom_menos)
         
         # Botões de ação
-        self.botao_salvar = ctk.CTkButton(self.frame_controles, text="Salvar Alterações", 
-                                        command=self.salvar_alteracoes)
-        self.botao_salvar.pack(side="left", padx=5)
+        self.botao_salvar = QPushButton("Salvar Alterações")
+        self.botao_salvar.clicked.connect(self.salvar_alteracoes)
+        self.layout_controles.addWidget(self.botao_salvar)
         
-        self.botao_cancelar = ctk.CTkButton(self.frame_controles, text="Cancelar", 
-                                          command=self.destroy)
-        self.botao_cancelar.pack(side="left", padx=5)
-    
+        self.botao_cancelar = QPushButton("Cancelar")
+        self.botao_cancelar.clicked.connect(self.reject)
+        self.layout_controles.addWidget(self.botao_cancelar)
+        
+        self.layout_principal.addWidget(self.frame_controles)
+        
+        # Atualizar a imagem
+        self.atualizar_canvas()
+        
     def atualizar_canvas(self):
-        """Atualiza a imagem exibida no canvas com o zoom atual"""
+        """Atualiza a imagem exibida com o zoom atual"""
         largura = int(self.imagem_editavel.width * self.zoom_atual)
         altura = int(self.imagem_editavel.height * self.zoom_atual)
         
@@ -90,62 +76,34 @@ class JanelaBorracha(ctk.CTkToplevel):
             Image.Resampling.NEAREST
         )
         
-        self.tk_imagem = ImageTk.PhotoImage(imagem_redimensionada)
+        # Converter de PIL para QPixmap
+        q_imagem = ImageQt.ImageQt(imagem_redimensionada)
+        self.pixmap = QPixmap.fromImage(q_imagem)
         
-        if hasattr(self, 'id_imagem_canvas'):
-            self.canvas.itemconfig(self.id_imagem_canvas, image=self.tk_imagem)
-        else:
-            self.id_imagem_canvas = self.canvas.create_image(0, 0, anchor='nw', image=self.tk_imagem)
-            
-        self.canvas.image = self.tk_imagem
-        self.canvas.config(scrollregion=(0, 0, largura, altura))
+        # Atualizar o widget de desenho
+        self.area_desenho.setPixmap(self.pixmap)
+        self.area_desenho.setFixedSize(largura, altura)
+        self.area_desenho.update()
     
-    def apagar(self, evento):
+    def apagar(self, x, y):
         """Apaga a área onde o mouse é clicado ou arrastado"""
-        x = int(self.canvas.canvasx(evento.x) / self.zoom_atual)
-        y = int(self.canvas.canvasy(evento.y) / self.zoom_atual)
+        x_real = int(x / self.zoom_atual)
+        y_real = int(y / self.zoom_atual)
         
         desenho = ImageDraw.Draw(self.imagem_editavel)
         desenho.ellipse(
-            (x - self.tamanho_borracha, y - self.tamanho_borracha, 
-            x + self.tamanho_borracha, y + self.tamanho_borracha), 
+            (x_real - self.tamanho_borracha, y_real - self.tamanho_borracha, 
+            x_real + self.tamanho_borracha, y_real + self.tamanho_borracha), 
             fill=(0, 0, 0, 0)
         )
         
         self.atualizar_canvas()
     
-    def mostrar_cursor(self, evento):
-        """Exibe o cursor da borracha no canvas"""
-        x = self.canvas.canvasx(evento.x)
-        y = self.canvas.canvasy(evento.y)
-        
-        if self.circulo_cursor:
-            self.canvas.delete(self.circulo_cursor)
-            
-        self.circulo_cursor = self.canvas.create_oval(
-            x - self.tamanho_borracha * self.zoom_atual, 
-            y - self.tamanho_borracha * self.zoom_atual,
-            x + self.tamanho_borracha * self.zoom_atual, 
-            y + self.tamanho_borracha * self.zoom_atual,
-            outline="red", width=2, fill="gray", stipple="gray50"
-        )
-    
-    def esconder_cursor(self, evento=None):
-        """Remove o cursor da borracha ao sair do canvas"""
-        if self.circulo_cursor:
-            self.canvas.delete(self.circulo_cursor)
-            self.circulo_cursor = None
-    
     def atualizar_tamanho_borracha(self, valor):
         """Atualiza o tamanho da borracha com base no slider"""
-        self.tamanho_borracha = int(valor)
-    
-    def ao_rolar_mouse(self, evento):
-        """Aplica zoom quando o usuário usa a roda do mouse"""
-        if evento.delta > 0:
-            self.zoom(1.1)
-        else:
-            self.zoom(0.9)
+        self.tamanho_borracha = valor
+        self.area_desenho.tamanho_cursor = valor
+        self.area_desenho.update()
     
     def zoom(self, fator):
         """Aplica zoom na imagem"""
@@ -159,4 +117,50 @@ class JanelaBorracha(ctk.CTkToplevel):
         """Salva as alterações e fecha a janela"""
         if self.callback_concluido:
             self.callback_concluido(self.imagem_editavel)
-        self.destroy()
+        self.accept()
+
+class AreaDesenhoBorracha(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMouseTracking(True)
+        self.parent = parent
+        self.ultima_posicao = None
+        self.tamanho_cursor = parent.tamanho_borracha
+        
+    def mousePressEvent(self, evento):
+        """Iniciar o apagamento"""
+        pos = evento.position()
+        self.ultima_posicao = (pos.x(), pos.y())
+        self.parent.apagar(pos.x(), pos.y())
+        
+    def mouseMoveEvent(self, evento):
+        """Continuar apagando enquanto arrasta o mouse"""
+        pos = evento.position()
+        if evento.buttons() & Qt.MouseButton.LeftButton:
+            x, y = pos.x(), pos.y()
+            self.parent.apagar(x, y)
+            
+        self.update()  # Atualiza o cursor
+        
+    def wheelEvent(self, evento):
+        """Propaga eventos de roda do mouse para o pai"""
+        fator = 1.1 if evento.angleDelta().y() > 0 else 0.9
+        self.parent.zoom(fator)
+        
+    def paintEvent(self, evento):
+        """Desenha a imagem e o cursor da borracha"""
+        super().paintEvent(evento)
+        
+        # Desenha o cursor da borracha
+        if self.underMouse():
+            pintor = QPainter(self)
+            pintor.setPen(QPen(QColor(255, 0, 0), 2))
+            
+            # Desenha borracha semi-transparente
+            pintor.setBrush(QBrush(QColor(128, 128, 128, 128)))
+            
+            # Posição do mouse
+            pos = self.mapFromGlobal(self.cursor().pos())
+            raio = self.tamanho_cursor * self.parent.zoom_atual
+            
+            pintor.drawEllipse(pos.x() - raio, pos.y() - raio, raio * 2, raio * 2)

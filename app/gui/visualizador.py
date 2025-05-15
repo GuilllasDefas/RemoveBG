@@ -1,75 +1,69 @@
-import customtkinter as ctk
-from tkinter import Canvas
-from PIL import Image, ImageTk
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QScrollArea, 
+                           QLabel, QPushButton, QWidget, QFrame)
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QPixmap, QImage
+from PIL import Image, ImageQt
 
-class VisualizadorImagem(ctk.CTkToplevel):
-    def __init__(self, master, imagem, titulo):
-        super().__init__(master)
-        self.title(titulo)
-        self.geometry("800x600")
-        self.grab_set()
+class VisualizadorImagem(QDialog):
+    def __init__(self, parent, imagem, titulo):
+        super().__init__(parent)
+        self.setWindowTitle(titulo)
+        self.resize(800, 600)
+        self.setModal(True)
         
         self.imagem_original = imagem
         self.zoom_atual = 1.0
         
-        # Frame principal
-        self.frame = ctk.CTkFrame(self)
-        self.frame.pack(fill="both", expand=True)
-        self.frame.grid_rowconfigure(0, weight=1)
-        self.frame.grid_columnconfigure(0, weight=1)
+        # Layout principal
+        self.layout_principal = QVBoxLayout(self)
         
-        # Canvas com scrollbars
-        self.canvas = Canvas(
-            self.frame, 
-            bd=0, 
-            highlightthickness=0, 
-            background=self._apply_appearance_mode(ctk.ThemeManager.theme["CTkFrame"]["fg_color"])
-        )
+        # Área de rolagem para a imagem
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         
-        self.rolagem_v = ctk.CTkScrollbar(self.frame, orientation="vertical", command=self.canvas.yview)
-        self.rolagem_h = ctk.CTkScrollbar(self.frame, orientation="horizontal", command=self.canvas.xview)
+        # Widget para conter a imagem
+        self.container_imagem = QLabel()
+        self.container_imagem.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.scroll_area.setWidget(self.container_imagem)
         
-        self.rolagem_v.grid(row=0, column=1, sticky="ns")
-        self.rolagem_h.grid(row=1, column=0, sticky="ew")
-        
-        self.canvas.grid(row=0, column=0, sticky="nsew")
-        self.canvas.configure(yscrollcommand=self.rolagem_v.set, xscrollcommand=self.rolagem_h.set)
-        
-        # Exibir imagem inicial
-        self.atualizar_canvas()
+        self.layout_principal.addWidget(self.scroll_area)
         
         # Frame de controles de zoom
-        self.frame_zoom = ctk.CTkFrame(self)
-        self.frame_zoom.pack(pady=5)
+        self.frame_zoom = QWidget()
+        self.layout_zoom = QHBoxLayout(self.frame_zoom)
+        self.layout_zoom.setContentsMargins(5, 5, 5, 5)
         
-        self.botao_zoom_mais = ctk.CTkButton(self.frame_zoom, text="+", width=40, 
-                                           command=lambda: self.zoom(1.2))
-        self.botao_zoom_mais.pack(side="left", padx=5)
+        self.botao_zoom_mais = QPushButton("+")
+        self.botao_zoom_mais.setFixedWidth(40)
+        self.botao_zoom_mais.clicked.connect(lambda: self.zoom(1.2))
+        self.layout_zoom.addWidget(self.botao_zoom_mais)
         
-        self.botao_zoom_menos = ctk.CTkButton(self.frame_zoom, text="-", width=40, 
-                                            command=lambda: self.zoom(0.8))
-        self.botao_zoom_menos.pack(side="left", padx=5)
+        self.botao_zoom_menos = QPushButton("-")
+        self.botao_zoom_menos.setFixedWidth(40)
+        self.botao_zoom_menos.clicked.connect(lambda: self.zoom(0.8))
+        self.layout_zoom.addWidget(self.botao_zoom_menos)
         
-        self.botao_zoom_reset = ctk.CTkButton(self.frame_zoom, text="1:1", width=40, 
-                                            command=lambda: self.zoom(1.0/self.zoom_atual))
-        self.botao_zoom_reset.pack(side="left", padx=5)
+        self.botao_zoom_reset = QPushButton("1:1")
+        self.botao_zoom_reset.setFixedWidth(40)
+        self.botao_zoom_reset.clicked.connect(lambda: self.zoom(1.0/self.zoom_atual))
+        self.layout_zoom.addWidget(self.botao_zoom_reset)
         
-        self.rotulo_zoom = ctk.CTkLabel(self.frame_zoom, text=f"Zoom: {self.zoom_atual:.1f}x")
-        self.rotulo_zoom.pack(side="left", padx=5)
+        self.rotulo_zoom = QLabel(f"Zoom: {self.zoom_atual:.1f}x")
+        self.layout_zoom.addWidget(self.rotulo_zoom)
         
-        # Eventos do mouse
-        self.canvas.bind("<MouseWheel>", self.ao_rolar_mouse)
-        self.canvas.bind("<Button-4>", lambda e: self.zoom(1.1))
-        self.canvas.bind("<Button-5>", lambda e: self.zoom(0.9))
+        self.layout_zoom.addStretch()
         
-        # Navegação com botão do meio do mouse
-        self.canvas.bind("<ButtonPress-2>", lambda e: self.canvas.scan_mark(e.x, e.y))
-        self.canvas.bind("<B2-Motion>", lambda e: self.canvas.scan_dragto(e.x, e.y, gain=1))
+        self.layout_principal.addWidget(self.frame_zoom)
         
-        self.after(100, lambda: self.canvas.focus_set())
-    
+        # Atualizar o canvas com a imagem inicial
+        self.atualizar_canvas()
+        
+        # Conectar eventos
+        self.container_imagem.wheelEvent = self.ao_rolar_mouse
+        
     def atualizar_canvas(self):
-        """Atualiza a imagem no canvas com o zoom atual"""
+        """Atualiza a imagem com o zoom atual"""
         try:
             largura = int(self.imagem_original.width * self.zoom_atual)
             altura = int(self.imagem_original.height * self.zoom_atual)
@@ -86,26 +80,24 @@ class VisualizadorImagem(ctk.CTkToplevel):
                 metodo_redimensionamento
             )
             
-            self.tk_imagem = ImageTk.PhotoImage(imagem_redimensionada)
+            # Converter de PIL para QPixmap
+            q_imagem = ImageQt.ImageQt(imagem_redimensionada)
+            pixmap = QPixmap.fromImage(q_imagem)
             
-            self.canvas.delete("all")
-            self.canvas.create_image(0, 0, anchor='nw', image=self.tk_imagem)
-            self.canvas.image = self.tk_imagem
-            self.canvas.config(scrollregion=self.canvas.bbox("all"))
+            self.container_imagem.setPixmap(pixmap)
+            self.container_imagem.setFixedSize(largura, altura)
             
             if hasattr(self, 'rotulo_zoom'):
-                self.rotulo_zoom.configure(text=f"Zoom: {self.zoom_atual:.1f}x")
+                self.rotulo_zoom.setText(f"Zoom: {self.zoom_atual:.1f}x")
                 
         except Exception as e:
             print(f"Erro ao atualizar canvas: {e}")
     
     def ao_rolar_mouse(self, evento):
         """Aplica zoom quando o usuário usa a roda do mouse"""
-        if evento.delta > 0:
-            self.zoom(1.1)
-        else:
-            self.zoom(0.9)
-    
+        fator = 1.1 if evento.angleDelta().y() > 0 else 0.9
+        self.zoom(fator)
+        
     def zoom(self, fator):
         """Aplica zoom na imagem"""
         novo_zoom = self.zoom_atual * fator

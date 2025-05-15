@@ -1,13 +1,18 @@
-import customtkinter as ctk
+from PyQt6.QtWidgets import QApplication
+import sys
 from app.gui.app_principal import AplicativoRemoveFundo
 
 def main():
-    # Configuração do tema
-    ctk.set_appearance_mode("System")
-    ctk.set_default_color_theme("blue")
+    # Inicialização da aplicação Qt
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")  # Estilo visual consistente
     
-    app = AplicativoRemoveFundo()
-    app.mainloop()
+    # Inicializa a janela principal
+    janela_principal = AplicativoRemoveFundo()
+    janela_principal.show()
+    
+    # Executa o loop de eventos
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
     main()

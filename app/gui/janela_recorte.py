@@ -1,121 +1,89 @@
-import customtkinter as ctk
-from tkinter import Canvas, Scrollbar
-from PIL import Image, ImageTk
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QScrollArea, 
+                           QLabel, QPushButton, QWidget, QFrame)
+from PyQt6.QtCore import Qt, QRect, QPoint
+from PyQt6.QtGui import QPixmap, QImage, QPainter, QPen, QColor
+from PIL import Image, ImageQt
 
-class JanelaRecorte(ctk.CTkToplevel):
-    def __init__(self, master, imagem, callback_concluido):
-        super().__init__(master)
-        self.title("Ferramenta de Recorte")
-        self.geometry("800x600")
-        self.grab_set()
+class JanelaRecorte(QDialog):
+    def __init__(self, parent, imagem, callback_concluido):
+        super().__init__(parent)
+        self.setWindowTitle("Ferramenta de Recorte")
+        self.resize(800, 600)
+        self.setModal(True)
         
         self.imagem_original = imagem
         self.callback_concluido = callback_concluido
         self.inicio_x = None
         self.inicio_y = None
-        self.retangulo_recorte = None
+        self.fim_x = None
+        self.fim_y = None
         self.zoom_atual = 1.0
         
-        # Frame do canvas
-        self.frame_canvas = ctk.CTkFrame(self)
-        self.frame_canvas.pack(fill="both", expand=True)
+        # Layout principal
+        self.layout_principal = QVBoxLayout(self)
         
-        # Canvas com scrollbars
-        self.canvas = Canvas(self.frame_canvas, bg='white')
-        self.canvas.grid(row=0, column=0, sticky="nsew")
+        # Widget de canvas para desenhar
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
         
-        self.rolagem_h = Scrollbar(self.frame_canvas, orient="horizontal", command=self.canvas.xview)
-        self.rolagem_h.grid(row=1, column=0, sticky="ew")
+        # Widget personalizado para desenhar o retângulo
+        self.area_desenho = AreaDesenhoRecorte(self)
+        self.scroll_area.setWidget(self.area_desenho)
         
-        self.rolagem_v = Scrollbar(self.frame_canvas, orient="vertical", command=self.canvas.yview)
-        self.rolagem_v.grid(row=0, column=1, sticky="ns")
-        
-        self.canvas.configure(xscrollcommand=self.rolagem_h.set, yscrollcommand=self.rolagem_v.set)
-        
-        # Configuração do layout
-        self.frame_canvas.grid_rowconfigure(0, weight=1)
-        self.frame_canvas.grid_columnconfigure(0, weight=1)
-        
-        # Exibe a imagem no canvas
-        self.exibir_imagem()
-        
-        # Eventos do mouse para selecionar área de recorte
-        self.canvas.bind("<ButtonPress-1>", self.ao_pressionar_mouse)
-        self.canvas.bind("<B1-Motion>", self.ao_mover_mouse)
-        self.canvas.bind("<MouseWheel>", self.ao_rolar_mouse)
+        self.layout_principal.addWidget(self.scroll_area)
         
         # Frame de controles de zoom
-        self.frame_zoom = ctk.CTkFrame(self)
-        self.frame_zoom.pack(pady=5)
+        self.frame_zoom = QWidget()
+        self.layout_zoom = QHBoxLayout(self.frame_zoom)
         
-        self.botao_zoom_mais = ctk.CTkButton(self.frame_zoom, text="Zoom +", 
-                                            command=lambda: self.zoom(1.2))
-        self.botao_zoom_mais.pack(side="left", padx=5)
+        self.botao_zoom_mais = QPushButton("Zoom +")
+        self.botao_zoom_mais.clicked.connect(lambda: self.zoom(1.2))
+        self.layout_zoom.addWidget(self.botao_zoom_mais)
         
-        self.botao_zoom_menos = ctk.CTkButton(self.frame_zoom, text="Zoom -", 
-                                             command=lambda: self.zoom(0.8))
-        self.botao_zoom_menos.pack(side="left", padx=5)
+        self.botao_zoom_menos = QPushButton("Zoom -")
+        self.botao_zoom_menos.clicked.connect(lambda: self.zoom(0.8))
+        self.layout_zoom.addWidget(self.botao_zoom_menos)
         
-        self.botao_zoom_reset = ctk.CTkButton(self.frame_zoom, text="Reset", 
-                                             command=lambda: self.zoom(1.0/self.zoom_atual))
-        self.botao_zoom_reset.pack(side="left", padx=5)
+        self.botao_zoom_reset = QPushButton("Reset")
+        self.botao_zoom_reset.clicked.connect(lambda: self.zoom(1.0/self.zoom_atual))
+        self.layout_zoom.addWidget(self.botao_zoom_reset)
+        
+        self.layout_principal.addWidget(self.frame_zoom)
         
         # Frame de botões de ação
-        self.frame_botoes = ctk.CTkFrame(self)
-        self.frame_botoes.pack(pady=5)
+        self.frame_botoes = QWidget()
+        self.layout_botoes = QHBoxLayout(self.frame_botoes)
         
-        self.botao_recortar = ctk.CTkButton(self.frame_botoes, text="Recortar", 
-                                           command=self.confirmar_recorte)
-        self.botao_recortar.pack(side="left", padx=10)
+        self.botao_recortar = QPushButton("Recortar")
+        self.botao_recortar.clicked.connect(self.confirmar_recorte)
+        self.layout_botoes.addWidget(self.botao_recortar)
         
-        self.botao_cancelar = ctk.CTkButton(self.frame_botoes, text="Cancelar", 
-                                          command=self.destroy)
-        self.botao_cancelar.pack(side="left", padx=10)
+        self.botao_cancelar = QPushButton("Cancelar")
+        self.botao_cancelar.clicked.connect(self.reject)
+        self.layout_botoes.addWidget(self.botao_cancelar)
+        
+        self.layout_principal.addWidget(self.frame_botoes)
+        
+        # Atualizar a imagem
+        self.exibir_imagem()
         
     def exibir_imagem(self):
-        """Exibe a imagem no canvas com o zoom atual"""
+        """Exibe a imagem no widget de desenho com o zoom atual"""
         largura = int(self.imagem_original.width * self.zoom_atual)
         altura = int(self.imagem_original.height * self.zoom_atual)
         
-        imagem_redimensionada = self.imagem_original.resize((largura, altura), 
-                                                           Image.Resampling.NEAREST)
-        self.tk_imagem = ImageTk.PhotoImage(imagem_redimensionada)
-        
-        # Limpa o canvas e adiciona a nova imagem
-        self.canvas.delete("all")
-        self.canvas.create_image(0, 0, anchor='nw', image=self.tk_imagem)
-        self.canvas.image = self.tk_imagem
-        
-        # Ajusta a área de rolagem
-        self.canvas.config(scrollregion=(0, 0, largura, altura))
-    
-    def ao_pressionar_mouse(self, evento):
-        """Inicia o desenho do retângulo de seleção"""
-        self.inicio_x = self.canvas.canvasx(evento.x)
-        self.inicio_y = self.canvas.canvasy(evento.y)
-        
-        if self.retangulo_recorte:
-            self.canvas.delete(self.retangulo_recorte)
-            
-        self.retangulo_recorte = self.canvas.create_rectangle(
-            self.inicio_x, self.inicio_y, self.inicio_x, self.inicio_y,
-            outline="red", width=2
+        imagem_redimensionada = self.imagem_original.resize(
+            (largura, altura), Image.Resampling.NEAREST
         )
-    
-    def ao_mover_mouse(self, evento):
-        """Atualiza o retângulo de seleção enquanto o mouse se move"""
-        if self.retangulo_recorte:
-            atual_x = self.canvas.canvasx(evento.x)
-            atual_y = self.canvas.canvasy(evento.y)
-            self.canvas.coords(self.retangulo_recorte, 
-                              self.inicio_x, self.inicio_y, atual_x, atual_y)
-    
-    def ao_rolar_mouse(self, evento):
-        """Aplica zoom quando o usuário usa a roda do mouse"""
-        if evento.delta > 0:
-            self.zoom(1.1)
-        else:
-            self.zoom(0.9)
+        
+        # Converter de PIL para QPixmap
+        q_imagem = ImageQt.ImageQt(imagem_redimensionada)
+        self.pixmap = QPixmap.fromImage(q_imagem)
+        
+        # Atualizar o widget de desenho
+        self.area_desenho.setPixmap(self.pixmap)
+        self.area_desenho.setFixedSize(largura, altura)
+        self.area_desenho.update()
     
     def zoom(self, fator):
         """Aplica zoom na imagem"""
@@ -125,25 +93,25 @@ class JanelaRecorte(ctk.CTkToplevel):
         if 0.1 <= novo_zoom <= 10.0:
             self.zoom_atual = novo_zoom
             self.exibir_imagem()
+            # Resetar o retângulo de seleção
+            self.area_desenho.inicio = None
+            self.area_desenho.fim = None
     
     def confirmar_recorte(self):
         """Confirma o recorte e chama o callback com a imagem recortada"""
-        if not self.retangulo_recorte:
-            self.destroy()
+        if not self.area_desenho.inicio or not self.area_desenho.fim:
+            self.reject()
             return
             
         # Obter coordenadas do retângulo
-        x1, y1, x2, y2 = map(int, self.canvas.coords(self.retangulo_recorte))
-        
-        # Garantir que x1 < x2 e y1 < y2
-        if x1 > x2:
-            x1, x2 = x2, x1
-        if y1 > y2:
-            y1, y2 = y2, y1
+        x1 = min(self.area_desenho.inicio.x(), self.area_desenho.fim.x())
+        y1 = min(self.area_desenho.inicio.y(), self.area_desenho.fim.y())
+        x2 = max(self.area_desenho.inicio.x(), self.area_desenho.fim.x())
+        y2 = max(self.area_desenho.inicio.y(), self.area_desenho.fim.y())
             
         # Verificar se a área selecionada é válida
         if x2 - x1 <= 0 or y2 - y1 <= 0:
-            self.destroy()
+            self.reject()
             return
             
         # Converter coordenadas de acordo com o zoom
@@ -163,4 +131,46 @@ class JanelaRecorte(ctk.CTkToplevel):
             # Passa tanto a imagem quanto as coordenadas de recorte
             self.callback_concluido(imagem_recortada, caixa_recorte)
             
-        self.destroy()
+        self.accept()
+
+class AreaDesenhoRecorte(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMouseTracking(True)
+        self.inicio = None
+        self.fim = None
+        self.parent = parent
+        
+    def mousePressEvent(self, evento):
+        """Inicia o desenho do retângulo"""
+        self.inicio = QPoint(evento.position().x(), evento.position().y())
+        self.fim = self.inicio
+        self.update()
+        
+    def mouseMoveEvent(self, evento):
+        """Atualiza o retângulo enquanto o mouse se move"""
+        if evento.buttons() & Qt.MouseButton.LeftButton and self.inicio:
+            self.fim = QPoint(evento.position().x(), evento.position().y())
+            self.update()
+            
+    def wheelEvent(self, evento):
+        """Propaga eventos de roda do mouse para o pai"""
+        fator = 1.1 if evento.angleDelta().y() > 0 else 0.9
+        self.parent.zoom(fator)
+        
+    def paintEvent(self, evento):
+        """Desenha a imagem e o retângulo de seleção"""
+        super().paintEvent(evento)
+        
+        if self.inicio and self.fim:
+            pintor = QPainter(self)
+            caneta = QPen(QColor(255, 0, 0))
+            caneta.setWidth(2)
+            pintor.setPen(caneta)
+            
+            x = min(self.inicio.x(), self.fim.x())
+            y = min(self.inicio.y(), self.fim.y())
+            largura = abs(self.fim.x() - self.inicio.x())
+            altura = abs(self.fim.y() - self.inicio.y())
+            
+            pintor.drawRect(x, y, largura, altura)
