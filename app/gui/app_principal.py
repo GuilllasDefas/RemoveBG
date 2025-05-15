@@ -453,7 +453,7 @@ class AplicativoRemoveFundo(ctk.CTk):
             
         JanelaRecorte(self, self.imagem_entrada_completa, self.aplicar_recorte)
     
-    def aplicar_recorte(self, imagem_recortada):
+    def aplicar_recorte(self, imagem_recortada, caixa_recorte=None):
         """Callback chamado quando o recorte é concluído"""
         self.imagem_entrada_completa = imagem_recortada
         self.exibir_imagem_no_canvas(self.canvas_imagem_original, self.imagem_entrada_completa, 'entrada')
@@ -773,18 +773,24 @@ class AplicativoRemoveFundo(ctk.CTk):
             pasta_destino = os.path.join(pasta_origem, "recorte output")
             os.makedirs(pasta_destino, exist_ok=True)
             
+            # Função de callback que recebe tanto a imagem quanto a caixa de recorte
+            def callback_recorte(imagem_recortada, caixa_recorte):
+                if caixa_recorte:
+                    self.iniciar_recorte_em_massa(pasta_origem, pasta_destino, caixa_recorte)
+            
             # Abre a janela de recorte
-            JanelaRecorte(self, imagem_modelo, 
-                        lambda imagem_recortada, caixa=None: self.iniciar_recorte_em_massa(pasta_origem, pasta_destino, caixa))
+            JanelaRecorte(self, imagem_modelo, callback_recorte)
             
         except Exception as e:
             messagebox.showerror("Erro", f"Falha ao abrir a imagem modelo:\n{e}")
     
     def iniciar_recorte_em_massa(self, pasta_origem, pasta_destino, caixa_recorte):
         """Inicia o processamento de recorte em massa"""
-        total_arquivos = len([f for f in os.listdir(pasta_origem) 
-                           if os.path.isfile(os.path.join(pasta_origem, f)) 
-                           and f.lower().endswith(EXTENSOES_SUPORTADAS)])
+        imagens = [f for f in os.listdir(pasta_origem) 
+                   if os.path.isfile(os.path.join(pasta_origem, f)) 
+                   and f.lower().endswith(EXTENSOES_SUPORTADAS)]
+        
+        total_arquivos = len(imagens)
         
         if total_arquivos == 0:
             messagebox.showinfo("Informação", "Nenhuma imagem compatível encontrada na pasta.")
@@ -798,15 +804,49 @@ class AplicativoRemoveFundo(ctk.CTk):
         self.update()
         
         def executar_recorte_massa():
-            processados, total, erros = EditorImagem.recortar_em_massa(
-                pasta_origem, pasta_destino, caixa_recorte
-            )
-            self.after(0, self.finalizar_recorte_massa, processados, total, erros)
+            processados = 0
+            erros = []
+            
+            for i, nome_arquivo in enumerate(imagens):
+                try:
+                    caminho_entrada = os.path.join(pasta_origem, nome_arquivo)
+                    nome_base, extensao = os.path.splitext(nome_arquivo)
+                    caminho_saida = os.path.join(pasta_destino, f"{nome_base}-recortado.png")
+                    
+                    # Atualizar progresso
+                    progresso = (i + 1) / total_arquivos
+                    texto_status = f"Recorte em massa {i+1}/{total_arquivos}: {nome_arquivo}"
+                    self.after(0, self.atualizar_progresso_lote, progresso, texto_status)
+                    
+                    # Carregar e processar a imagem
+                    imagem = carregar_imagem(caminho_entrada)
+                    
+                    # Exibir preview da imagem original
+                    self.after(0, lambda img=imagem: self.exibir_imagem_no_canvas(
+                        self.canvas_imagem_original, img, 'entrada'))
+                    
+                    # Recortar a imagem
+                    imagem_recortada = EditorImagem.recortar_imagem(imagem, caixa_recorte)
+                    
+                    # Exibir preview do resultado
+                    self.after(0, lambda img=imagem_recortada: self.exibir_imagem_no_canvas(
+                        self.canvas_imagem_resultado, img, 'resultado'))
+                    
+                    # Salvar o resultado
+                    imagem_recortada.save(caminho_saida)
+                    processados += 1
+                    
+                except Exception as e:
+                    erro_msg = f"{nome_arquivo}: {str(e)}"
+                    erros.append(erro_msg)
+                    print(f"Erro ao processar {nome_arquivo}: {e}")
+            
+            self.after(0, self.finalizar_recorte_em_massa, processados, total_arquivos, erros)
             
         self.processamento_ativo = True
         threading.Thread(target=executar_recorte_massa, daemon=True).start()
     
-    def finalizar_recorte_massa(self, processados, total, erros):
+    def finalizar_recorte_em_massa(self, processados, total, erros):
         """Finaliza o recorte em massa e exibe o resultado"""
         self.processamento_ativo = False
         self.definir_interface_processando(False)

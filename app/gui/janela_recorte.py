@@ -147,16 +147,20 @@ class JanelaRecorte(ctk.CTkToplevel):
             return
             
         # Converter coordenadas de acordo com o zoom
-        x1 = int(x1 / self.zoom_atual)
-        y1 = int(y1 / self.zoom_atual)
-        x2 = int(x2 / self.zoom_atual)
-        y2 = int(y2 / self.zoom_atual)
+        x1_real = int(x1 / self.zoom_atual)
+        y1_real = int(y1 / self.zoom_atual)
+        x2_real = int(x2 / self.zoom_atual)
+        y2_real = int(y2 / self.zoom_atual)
+        
+        # Área de recorte para processamento em lote
+        caixa_recorte = (x1_real, y1_real, x2_real, y2_real)
         
         # Recortar a imagem
-        imagem_recortada = self.imagem_original.crop((x1, y1, x2, y2))
+        imagem_recortada = self.imagem_original.crop(caixa_recorte)
         
-        # Chamar o callback com a imagem recortada
+        # Chamar o callback com a imagem recortada e a caixa de recorte
         if self.callback_concluido:
-            self.callback_concluido(imagem_recortada)
+            # Passa tanto a imagem quanto as coordenadas de recorte
+            self.callback_concluido(imagem_recortada, caixa_recorte)
             
         self.destroy()
