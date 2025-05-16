@@ -31,6 +31,7 @@ RemoveBG/
 │   │
 │   └── utils/             # Utilitários
 │       ├── __init__.py
+│       ├── estilos.py  # Estilos globais de cores
 │       └── imagem_utils.py  # Funções de manipulação de imagens
 │
 ├── main.py                # Ponto de entrada da aplicação
