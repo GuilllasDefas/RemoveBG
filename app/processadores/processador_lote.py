@@ -1,7 +1,5 @@
 import os
 
-from PIL import Image, ImageOps
-
 from app.configuracoes import EXTENSOES_SUPORTADAS
 from app.utils.imagem_utils import carregar_imagem
 

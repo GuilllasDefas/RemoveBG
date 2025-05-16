@@ -70,7 +70,7 @@ class EditorImagem:
 
             for nome_arquivo in imagens:
                 caminho_entrada = os.path.join(pasta_origem, nome_arquivo)
-                nome_base, extensao = os.path.splitext(nome_arquivo)
+                nome_base = os.path.splitext(nome_arquivo)
                 caminho_saida = os.path.join(
                     pasta_destino, f'{nome_base}-recortado.png'
                 )
