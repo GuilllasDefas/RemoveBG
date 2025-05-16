@@ -89,7 +89,3 @@ Para um guia detalhado, consulte o [Manual do Usuário](docs/manual_do_usuario.m
 ## 📄 Licença
 
 Este projeto está licenciado sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
-
-## 📞 Contato
-
-Para dúvidas, sugestões ou contribuições, abra uma issue no GitHub ou entre em contato pelo email: seu-email@exemplo.com
