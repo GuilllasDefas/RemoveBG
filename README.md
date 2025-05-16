@@ -19,7 +19,7 @@ RemoveBG é uma aplicação desktop que permite remover o fundo de imagens de fo
 
 ## 🔧 Requisitos
 
-- Python 3.8+
+- Python 3.12+ (usei a versão 3.12.9)
 - PyQt6
 - Pillow (PIL)
 - rembg

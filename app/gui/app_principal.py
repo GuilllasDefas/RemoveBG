@@ -1,9 +1,9 @@
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QGridLayout, 
                            QPushButton, QLabel, QWidget, QFileDialog, QMessageBox,
                            QComboBox, QCheckBox, QSlider, QProgressBar, QScrollArea,
-                           QFrame, QSplitter, QMenu, QStatusBar)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QTimer
-from PyQt6.QtGui import QAction, QPixmap, QImage, QFont
+                           QFrame, QStatusBar)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QAction, QPixmap, QFont, QIcon
 import os
 import threading
 import io
@@ -19,7 +19,6 @@ from app.gui.janela_recorte import JanelaRecorte
 from app.gui.janela_borracha import JanelaBorracha
 from app.gui.visualizador import VisualizadorImagem
 from app.processadores.removedor_fundo import RemoveFundo
-from app.processadores.processador_lote import ProcessadorLote
 from app.processadores.editor_imagem import EditorImagem
 from app.utils.imagem_utils import criar_preview, carregar_imagem
 
@@ -47,6 +46,7 @@ class AplicativoRemoveFundo(QMainWindow):
         super().__init__()
         self.setWindowTitle(TITULO_APP)
         self.resize(1250, 850)
+        self.setWindowIcon(QIcon("app/gui/icon.ico"))
         
         # Variáveis para guardar o modelo selecionado
         self.modelo_selecionado = MODELO_PADRAO

@@ -1,6 +1,5 @@
-from PyQt6.QtWidgets import QLabel, QWidget, QVBoxLayout
+from PyQt6.QtWidgets import QLabel
 from PyQt6.QtCore import Qt, QTimer, QPoint, QEvent
-from PyQt6.QtGui import QFont
 
 class DicaFlutuante(QLabel):
     """ Cria uma dica flutuante (tooltip) customizada para um widget PyQt6 

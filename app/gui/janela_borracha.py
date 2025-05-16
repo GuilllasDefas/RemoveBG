@@ -130,14 +130,14 @@ class AreaDesenhoBorracha(QLabel):
     def mousePressEvent(self, evento):
         """Iniciar o apagamento"""
         pos = evento.position()
-        self.ultima_posicao = (pos.x(), pos.y())
-        self.parent.apagar(pos.x(), pos.y())
+        self.ultima_posicao = (int(pos.x()), int(pos.y()))
+        self.parent.apagar(int(pos.x()), int(pos.y()))
         
     def mouseMoveEvent(self, evento):
         """Continuar apagando enquanto arrasta o mouse"""
         pos = evento.position()
         if evento.buttons() & Qt.MouseButton.LeftButton:
-            x, y = pos.x(), pos.y()
+            x, y = int(pos.x()), int(pos.y())
             self.parent.apagar(x, y)
             
         self.update()  # Atualiza o cursor

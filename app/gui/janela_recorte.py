@@ -143,14 +143,14 @@ class AreaDesenhoRecorte(QLabel):
         
     def mousePressEvent(self, evento):
         """Inicia o desenho do retângulo"""
-        self.inicio = QPoint(evento.position().x(), evento.position().y())
+        self.inicio = QPoint(int(evento.position().x()), int(evento.position().y()))
         self.fim = self.inicio
         self.update()
         
     def mouseMoveEvent(self, evento):
         """Atualiza o retângulo enquanto o mouse se move"""
         if evento.buttons() & Qt.MouseButton.LeftButton and self.inicio:
-            self.fim = QPoint(evento.position().x(), evento.position().y())
+            self.fim = QPoint(int(evento.position().x()), int(evento.position().y()))
             self.update()
             
     def wheelEvent(self, evento):
