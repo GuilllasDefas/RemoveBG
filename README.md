@@ -19,7 +19,7 @@ RemoveBG é uma aplicação desktop que permite remover o fundo de imagens de fo
 
 ## 🔧 Requisitos
 
-- Python 3.12+ (usei a versão 3.12.9)
+- Python 3.8+ (recomendado 3.12+)
 - PyQt6
 - Pillow (PIL)
 - rembg
@@ -50,7 +50,7 @@ Para instruções detalhadas, consulte o [Guia de Instalação](docs/instalacao.
 2. **Selecionar Imagem**: Use o menu "Arquivo > Selecionar Imagem" ou o botão correspondente
 3. **Escolher Modelo**: Selecione o modelo de IA desejado no painel lateral
 4. **Ajustar Configurações**: Configure parâmetros como Alpha Matting, Limiar e Erosão
-5. **Processar Imagem**: Clique em "Aplicar Ajustes" para remover o fundo
+5. **Processar Imagem**: Clique no botão "Remover Fundo" no painel lateral
 6. **Salvar Resultado**: Use o menu "Arquivo > Salvar Resultado"
 
 Para um guia detalhado, consulte o [Manual do Usuário](docs/manual_do_usuario.md).

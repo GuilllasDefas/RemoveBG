@@ -21,7 +21,6 @@ A interface do RemoveBG é dividida em três áreas principais:
 
 - **Ferramentas**
   - **Processar Pasta**: Inicia o processamento em lote
-  - **Aplicar Ajustes**: Processa a imagem atual com as configurações atuais
   - **Cortar Imagem**: Abre a ferramenta de recorte
   - **Borracha**: Abre a ferramenta de borracha
   - **Recorte em Massa**: Aplica o mesmo recorte em várias imagens
@@ -49,7 +48,7 @@ No painel direito, ajuste as configurações conforme necessário:
 
 ### 3. Processar a Imagem
 
-- Clique em **Ferramentas > Aplicar Ajustes** ou no botão correspondente
+- Clique no botão principal **Remover Fundo** no painel lateral direito
 - Aguarde o processamento (o tempo varia conforme o tamanho da imagem e o modelo escolhido)
 - O resultado será exibido no painel central
 
