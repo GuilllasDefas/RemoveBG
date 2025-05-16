@@ -365,6 +365,7 @@ class AplicativoRemoveFundo(QMainWindow):
         self.acao_processar.setEnabled(tem_imagem)
         self.acao_recorte.setEnabled(tem_imagem)
         self.acao_borracha.setEnabled(tem_imagem)
+        self.botao_ver_resultado.setEnabled(tem_resultado)
     
     def mostrar_sobre(self):
         """Exibe informações sobre o aplicativo"""
@@ -469,24 +470,13 @@ class AplicativoRemoveFundo(QMainWindow):
         except Exception as e:
             print(f"Erro ao exibir imagem no label: {e}")
     
-    def abrir_ferramenta_recorte(self):
-        """Abre a janela para recortar a imagem original"""
-        if not self.imagem_entrada_completa:
-            QMessageBox.warning(self, "Atenção", "Nenhuma imagem carregada para recorte!")
-            return
-            
-        janela_recorte = JanelaRecorte(self, self.imagem_entrada_completa, self.aplicar_recorte)
-        janela_recorte.exec()
-    
     def aplicar_recorte(self, imagem_recortada, caixa_recorte=None):
         """Callback chamado quando o recorte é concluído"""
-        self.imagem_entrada_completa = imagem_recortada
-        self.exibir_imagem_no_label(self.label_imagem_original, self.imagem_entrada_completa)
+        # Em vez de modificar a imagem original, definimos o resultado
+        self.imagem_resultado_completa = imagem_recortada
+        self.exibir_imagem_no_label(self.label_imagem_resultado, self.imagem_resultado_completa)
         self.atualizar_estados_menu()
-        self.imagem_resultado_completa = None
-        self.label_imagem_resultado.clear()
         
-        self.botao_ver_resultado.setEnabled(False)
         self.rotulo_status.setText("Imagem recortada com sucesso.")
     
     def abrir_ferramenta_borracha(self):
@@ -494,21 +484,34 @@ class AplicativoRemoveFundo(QMainWindow):
         if not self.imagem_entrada_completa:
             QMessageBox.warning(self, "Atenção", "Nenhuma imagem carregada para edição!")
             return
-            
-        janela_borracha = JanelaBorracha(self, self.imagem_entrada_completa, self.aplicar_borracha)
+        
+        # Se já tiver uma imagem resultado, use-a como base para edição
+        imagem_base = self.imagem_resultado_completa if self.imagem_resultado_completa else self.imagem_entrada_completa
+        
+        janela_borracha = JanelaBorracha(self, imagem_base, self.aplicar_borracha)
         janela_borracha.exec()
     
     def aplicar_borracha(self, imagem_editada):
         """Callback chamado quando a edição com borracha é concluída"""
-        self.imagem_entrada_completa = imagem_editada
-        self.exibir_imagem_no_label(self.label_imagem_original, self.imagem_entrada_completa)
+        # Em vez de modificar a imagem original, definimos o resultado
+        self.imagem_resultado_completa = imagem_editada
+        self.exibir_imagem_no_label(self.label_imagem_resultado, self.imagem_resultado_completa)
         self.atualizar_estados_menu()
-        self.imagem_resultado_completa = None
-        self.label_imagem_resultado.clear()
         
-        self.botao_ver_resultado.setEnabled(False)
         self.rotulo_status.setText("Imagem editada com sucesso.")
     
+    def abrir_ferramenta_recorte(self):
+        """Abre a janela para recortar a imagem"""
+        if not self.imagem_entrada_completa:
+            QMessageBox.warning(self, "Atenção", "Nenhuma imagem carregada para recorte!")
+            return
+            
+        # Se já tiver uma imagem resultado, use-a como base para recorte
+        imagem_base = self.imagem_resultado_completa if self.imagem_resultado_completa else self.imagem_entrada_completa
+        
+        janela_recorte = JanelaRecorte(self, imagem_base, self.aplicar_recorte)
+        janela_recorte.exec()
+        
     def processar_imagem(self):
         """Processa a imagem para remover o fundo"""
         if not self.imagem_entrada_completa:
@@ -596,12 +599,8 @@ class AplicativoRemoveFundo(QMainWindow):
         self.atualizar_estados_menu()
     
     def salvar_imagem(self):
-        """Salva a imagem processada ou a imagem editada pela ferramenta de borracha"""
-        if self.imagem_resultado_completa:
-            imagem_para_salvar = self.imagem_resultado_completa
-        elif self.imagem_entrada_completa:
-            imagem_para_salvar = self.imagem_entrada_completa
-        else:
+        """Salva a imagem resultante (processada ou editada)"""
+        if not self.imagem_resultado_completa:
             QMessageBox.warning(self, "Atenção", "Não há imagem processada ou editada para salvar!")
             return
             
@@ -620,7 +619,7 @@ class AplicativoRemoveFundo(QMainWindow):
         if caminho_arquivo:
             try:
                 self.rotulo_status.setText("Salvando imagem...")
-                imagem_para_salvar.save(caminho_arquivo)
+                self.imagem_resultado_completa.save(caminho_arquivo)
                 self.rotulo_status.setText("Imagem salva com sucesso!")
             except Exception as e:
                 QMessageBox.critical(self, "Erro", f"Falha ao salvar a imagem:\n{e}")
