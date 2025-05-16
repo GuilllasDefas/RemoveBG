@@ -163,4 +163,5 @@ class AreaDesenhoBorracha(QLabel):
             pos = self.mapFromGlobal(self.cursor().pos())
             raio = self.tamanho_cursor * self.parent.zoom_atual
             
-            pintor.drawEllipse(pos.x() - raio, pos.y() - raio, raio * 2, raio * 2)
+            # Convertendo para inteiros para evitar o erro de tipo
+            pintor.drawEllipse(int(pos.x() - raio), int(pos.y() - raio), int(raio * 2), int(raio * 2))

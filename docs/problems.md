@@ -1,1 +1,3 @@
 - Processamento massivo não mostra o preview
+- Corte massivo não mostra o em resultados
+- corte de imagem não permite salvar

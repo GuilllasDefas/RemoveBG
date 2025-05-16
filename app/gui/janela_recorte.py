@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QScrollArea, 
-                           QLabel, QPushButton, QWidget, QFrame)
-from PyQt6.QtCore import Qt, QRect, QPoint
-from PyQt6.QtGui import QPixmap, QImage, QPainter, QPen, QColor
+                           QLabel, QPushButton, QWidget)
+from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor
 from PIL import Image, ImageQt
 
 class JanelaRecorte(QDialog):
